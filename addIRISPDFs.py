@@ -6,6 +6,7 @@ import numpy as np
 from glob import glob
 import requests
 
+import pandas as pd
 
 from noiseplot import setupPSDPlot
 from obspy.imaging.cm import pqlx
@@ -23,40 +24,64 @@ workdir = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF'
 
 
 # Read text file returned from IRIS' fedcat service to build list of channel on/off dates
-# consider using requests to get this instead of a separate shell script?
+# consider using requests to get the fedcat file, and maybe process directly with pandas, instead of requesting w/a separate shell script?
 infile = workdir+'/irisfedcat_HZ_gt200.txt'
-chanfile = open(infile, 'r')
-targets = []
-nslcs = []
-channel_startdates = []
-channel_enddates = []
-lines = chanfile.readlines()
-for line in lines:
-    l = line.strip().split('|')
-    nslc = '.'.join(l[0:4])
-    target = nslc+'.M'
-    s1 = UTCDateTime(l[15])
-    e1 = UTCDateTime(l[16])
-    print(target, s1, e1)
-    targets.append(target)
-    nslcs.append(nslc)
-    channel_startdates.append(s1)
-    channel_enddates.append(e1)
+#chanfile = open(infile, 'r')
+#targets = []
+#nslcs = []
+#channel_startdates = []
+#channel_enddates = []
+#lines = chanfile.readlines()
+#for line in lines:
+#    l = line.strip().split('|')
+#    nslc = '.'.join(l[0:4])
+#    target = nslc+'.M'
+#    s1 = UTCDateTime(l[15])
+#    e1 = UTCDateTime(l[16])
+#    print(target, s1, e1)
+#    targets.append(target)
+#    nslcs.append(nslc)
+#    channel_startdates.append(s1)
+#    channel_enddates.append(e1)
 
-def checkAboveLNM(targets, channel_startdates, channel_enddates):
+# Use Pandas instead??
+df = pd.read_csv(infile, sep='|') #, skiprows=[1,2])
+df.rename(columns=lambda x: x.strip(), inplace=True)
+df.rename(columns=lambda x: x.strip('#'), inplace=True)
+#df = pd.read_csv('irisfedcat.txt', sep='|', skiprows=[1,2])
+
+# Replace NaN locations with a blank
+df = df.replace(pd.np.nan, '')
+
+# Make a new column w/NSCLQ target for MUSTANG
+#df['Target'] = stns.Network+'.'+stns.Station+'.'+stns.Location+'.'+stns.Channel + '.M'
+df['Target'] = df[['Network', 'Station', 'Location', 'Channel']].apply(lambda row: '.'.join(row.values.astype(str))+'.M', axis=1)
+useindex = []
+
+#def checkAboveLNM(targets, channel_startdates, channel_enddates):
+def checkAboveLNM(df): 
     pdffiles = []
     notusedfile = open('notused.txt', 'w')
     usedfile = open('used.txt', 'w')
-    for i in range(len(targets)):
+    for i in range(len(df.Target)):
 # for each channel, request pct_below_nlnm metric
-        channel_totaltime = channel_enddates[i] - channel_startdates[i]
-        res = requests.get('http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&target={0}&format=text&value_gt=10&orderby=start_asc&nodata=404&start={1}&end={2}'.format(targets[i], channel_startdates[i].format_iris_web_service().split('T')[0],(channel_enddates[i]+1).format_iris_web_service().split('T')[0]))
+        starttime = UTCDateTime(df.StartTime[i])
+        endtime = UTCDateTime(df.EndTime[i])
+        channel_totaltime = endtime - starttime 
+        startstring = starttime.date.strftime('%Y-%m-%d')
+# add one day to endstring, bc endtimes often are stored as 23:59:59 so we want to round up
+        endstring = (endtime+86400).date.strftime('%Y-%m-%d') 
+#        print(startstring, endstring)
+        reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
+        reqstring = reqbase+'&target={0}&value_gt=10&start={1}&end={2}'.format(df.Target[i],startstring,endstring)
+#        res = requests.get('http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&target={0}&format=text&value_gt=10&orderby=start_asc&nodata=404&start={1}&end={2}'.format(df.Target[i], startstring,endstring))
+        res = requests.get(reqstring)
+ #       print(reqstring)
         below_startdates = []
         below_enddates = []
-#        print(res.text)
         text = res.text.split('\n')[2:-1]
-        text2 = [i.split(',') for i in text]
-#        print('len of text2', len(text2))
+        text2 = [k.split(',') for k in text]
+#        print(text2)
         if len(text2) > 0:
             for t in text2:
                 #print(t)
@@ -72,12 +97,14 @@ def checkAboveLNM(targets, channel_startdates, channel_enddates):
         else: 
             lifetime_pct_below = 0.
         if lifetime_pct_below <= 10:
-            pdffiles.append(workdir+'/'+targets[i]+'.txt')
-            usedfile.write('{0} {1} {2}\n'.format(targets[i], channel_startdates[i], channel_enddates[i]))
+            pdffiles.append(workdir+'/'+df.Target[i]+'_'+df.StartTime+'_'+df.EndTime+'.txt') # STOPPED 11 Oct 2018: I know this is going to break the workflow so let's fix it tomorrow: need to add a section to this script that requests & names PDF files according to this convention.  Currently assumes we've already requested PDF files, but why bother requesting the ones we don't want?
+# although maybe I should make some kind of option to not re-request a file if it already exists on disk
+# and to deal w/not using certain PDF files if they don't match the list returned here...like if we've already downloaded the file but I decide to add an option to change the pct_below_nlnm value??
+            usedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
         else:
-            notusedfile.write('{0} {1} {2}\n'.format(targets[i], channel_startdates[i], channel_enddates[i]))
+            notusedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
 
-        print(targets[i], '% days in lifetime >10% below LNM:', lifetime_pct_below)
+        print(df.Target[i], '% days in lifetime >10% below LNM:', lifetime_pct_below)
 
 
     usedfile.close()
@@ -86,7 +113,8 @@ def checkAboveLNM(targets, channel_startdates, channel_enddates):
 
 # write out list of all channels used...
 
-pdffiles = checkAboveLNM(targets, channel_startdates, channel_enddates)
+#pdffiles = checkAboveLNM(targets, channel_startdates, channel_enddates)
+pdffiles = checkAboveLNM(df)
 # or if we don't want to wait for re-requested data
 # last request: don't use anything that's >10% below LNM for more than 20% of lifetime
 #usedfile = open('used.txt') 
