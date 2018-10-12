@@ -27,37 +27,46 @@ workdir = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF'
 # Read text file returned from IRIS' fedcat service to build list of channel on/off dates
 # consider using requests to get the fedcat file, and maybe process directly with pandas, instead of requesting w/a separate shell script?
 infile = workdir+'/irisfedcat_HZ_gt200.txt'
-#chanfile = open(infile, 'r')
-#targets = []
-#nslcs = []
-#channel_startdates = []
-#channel_enddates = []
-#lines = chanfile.readlines()
-#for line in lines:
-#    l = line.strip().split('|')
-#    nslc = '.'.join(l[0:4])
-#    target = nslc+'.M'
-#    s1 = UTCDateTime(l[15])
-#    e1 = UTCDateTime(l[16])
-#    print(target, s1, e1)
-#    targets.append(target)
-#    nslcs.append(nslc)
-#    channel_startdates.append(s1)
-#    channel_enddates.append(e1)
+df = readIRISfedcat(infile)
+useindex = []
 
-# Use Pandas instead??
-df = pd.read_csv(infile, sep='|') #, skiprows=[1,2])
-df.rename(columns=lambda x: x.strip(), inplace=True)
-df.rename(columns=lambda x: x.strip('#'), inplace=True)
-#df = pd.read_csv('irisfedcat.txt', sep='|', skiprows=[1,2])
+def readIRISfedcat(fedcatfile):
+# read file returned by fedcat, clean up headers, add columns holding start/end y-m-d for MUSTANG requests
+    df = pd.read_csv(fedcatfile, sep='|')
+    df.rename(columns=lambda x: x.strip(), inplace=True)
+    df.rename(columns=lambda x: x.strip('#'), inplace=True)
 
-# Replace NaN locations with a blank
-df = df.replace(pd.np.nan, '')
+# Replace NaN Locations with a blank character
+    df = df.replace(pd.np.nan, '')
 
 # Make a new column w/NSCLQ target for MUSTANG
-#df['Target'] = stns.Network+'.'+stns.Station+'.'+stns.Location+'.'+stns.Channel + '.M'
-df['Target'] = df[['Network', 'Station', 'Location', 'Channel']].apply(lambda row: '.'.join(row.values.astype(str))+'.M', axis=1)
-useindex = []
+    #df['Target'] = stns.Network+'.'+stns.Station+'.'+stns.Location+'.'+stns.Channel + '.M'
+    df['Target'] = df[['Network', 'Station', 'Location', 'Channel']].apply(lambda row: '.'.join(row.values.astype(str))+'.M', axis=1)
+
+# Add columns holding start/end y-m-d for use with MUSTANG requests
+# Round end time up to start of next day since MUSTANG noise-pdf works by day
+# Could use 'today' as stopdate for most up-to-date data, but will set to a fixed date for now for reproducibility
+# NOTE: pandas datetime overflows for dates far in future (eg 2599 etc) so we have to work around this
+# Store StartDate and EndDate as strings for easy use in building MUSTANG URLs.
+#    stopdate = pd.to_datetime('today')
+    stopdate = pd.to_datetime('2018-10-12')
+    stopstring = stopdate.strftime('%Y-%m-%dT%H:%M:%S')
+
+    starttimes = pd.to_datetime(df.StartTime)
+
+# replace 2599 dates BEFORE converting to datetime to avoid errors
+# then convert, and replace all future dates w/stopdate
+    endtimes = pd.to_datetime(df.EndTime.replace(to_replace='2599-12-31T23:59:59', value=stopstring)) 
+    endtimes[endtimes > stopdate ] = stopdate
+
+    df['StartDate'] = starttimes.dt.strftime('%Y-%m-%d')
+    df['EndDate'] = endtimes.dt.ceil('D').dt.strftime('%Y-%m-%d')
+
+    df['TotalTime'] = (endtimes - starttimes).dt.total_seconds()
+
+    return df
+
+
 
 #def checkAboveLNM(targets, channel_startdates, channel_enddates):
 def checkAboveLNM(df): 
@@ -69,12 +78,12 @@ def checkAboveLNM(df):
         starttime = UTCDateTime(df.StartTime[i])
         endtime = UTCDateTime(df.EndTime[i])
         channel_totaltime = endtime - starttime 
-        startstring = starttime.date.strftime('%Y-%m-%d')
+#        startstring = starttime.date.strftime('%Y-%m-%d')
 # add one day to endstring, bc endtimes often are stored as 23:59:59 so we want to round up
-        endstring = (endtime+86400).date.strftime('%Y-%m-%d') 
+#        endstring = (endtime+86400).date.strftime('%Y-%m-%d') 
 #        print(startstring, endstring)
         reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
-        reqstring = reqbase+'&target={0}&value_gt=10&start={1}&end={2}'.format(df.Target[i],startstring,endstring)
+        reqstring = reqbase+'&target={0}&value_gt=10&start={1}&end={2}'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
 #        res = requests.get('http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&target={0}&format=text&value_gt=10&orderby=start_asc&nodata=404&start={1}&end={2}'.format(df.Target[i], startstring,endstring))
         res = requests.get(reqstring)
  #       print(reqstring)
@@ -124,7 +133,7 @@ def checkAboveLNM(df):
 #pdffiles = checkAboveLNM(df)
 #df_selected = checkAboveLNM(df)
 
-# or if we've already run checkAboveLNM and already have a 'selected' file:
+# or if we've already run checkAboveLNM to produce a 'selected' file (or we've made it some other way): 
 #df_selected = pd.read_csv('irisfedcat_selected.txt', sep='|')
 #df_selected = pd.read_csv('irisfedcat_selected_gt200.txt', sep='|')
 df_selected = pd.read_csv('irisfedcat_selected_gt250.txt', sep='|')
@@ -132,6 +141,7 @@ df_selected.rename(columns=lambda x: x.strip(), inplace=True)
 df_selected.rename(columns=lambda x: x.strip('#'), inplace=True) 
 
 def requestPDFs(df):
+# to do: add check to see if PDF file of date/time range of interest already exists in outpdfdir?
     outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
     for i in range(len(df.Target)):
         print(df.Target[i])
@@ -153,21 +163,21 @@ def requestPDFs(df):
 #requestPDFs(df_selected)
 #sys.exit()
 
+
 def listPDFFiles(df):
+# to do: check to see if all pdf files exist in outpdfdir, and if not, request missing ones?
     outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
     pdffiles = []
     for i in range(len(df.Target)):
-        starttime = UTCDateTime(df.StartTime[i])
-        endtime = UTCDateTime(df.EndTime[i])
-        startstring = starttime.date.strftime('%Y-%m-%d')
-# add one day to endstring, bc endtimes often are stored as 23:59:59 so we want to round up
-        endstring = (endtime+86400).date.strftime('%Y-%m-%d') 
-        pdffile = outpdfdir+'/'+df.Target[i]+'_'+startstring+'_'+endstring+'.txt'
+        pdffile = outpdfdir+'/'+df.Target[i]+'_'+df.StartDate+'_'+df.EndDate+'.txt'
+# todo        if pdffile exists:
         pdffiles.append(pdffile)
+# todo    else:
+# todo        make slice of dataframe for that pdf file
+# todo        requestPDF()
     return pdffiles
 
 pdffiles = listPDFFiles(df_selected)
-
 
 #print(pdffiles)
 
