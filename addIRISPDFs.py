@@ -30,6 +30,7 @@ infile = workdir+'/irisfedcat_HZ_gt200.txt'
 df = readIRISfedcat(infile)
 useindex = []
 
+####################################
 def readIRISfedcat(fedcatfile):
 # read file returned by fedcat, clean up headers, add columns holding start/end y-m-d for MUSTANG requests
     df = pd.read_csv(fedcatfile, sep='|')
@@ -65,26 +66,17 @@ def readIRISfedcat(fedcatfile):
     df['TotalTime'] = (endtimes - starttimes).dt.total_seconds()
 
     return df
+####################################
 
-
-
-#def checkAboveLNM(targets, channel_startdates, channel_enddates):
+####################################
 def checkAboveLNM(df): 
     pdffiles = []
     notusedfile = open('notused.txt', 'w')
     usedfile = open('used.txt', 'w')
     for i in range(len(df.Target)):
-# for each channel, request pct_below_nlnm metric
-        starttime = UTCDateTime(df.StartTime[i])
-        endtime = UTCDateTime(df.EndTime[i])
-        channel_totaltime = endtime - starttime 
-#        startstring = starttime.date.strftime('%Y-%m-%d')
-# add one day to endstring, bc endtimes often are stored as 23:59:59 so we want to round up
-#        endstring = (endtime+86400).date.strftime('%Y-%m-%d') 
-#        print(startstring, endstring)
+    # for each channel, request pct_below_nlnm metric
         reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
         reqstring = reqbase+'&target={0}&value_gt=10&start={1}&end={2}'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
-#        res = requests.get('http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&target={0}&format=text&value_gt=10&orderby=start_asc&nodata=404&start={1}&end={2}'.format(df.Target[i], startstring,endstring))
         res = requests.get(reqstring)
  #       print(reqstring)
         below_startdates = []
@@ -103,12 +95,12 @@ def checkAboveLNM(df):
             for j in range(len(below_startdates)):
                 dt = below_enddates[j] - below_startdates[j]
                 total_below_time += dt
-            lifetime_pct_below = total_below_time/channel_totaltime*100.
+            lifetime_pct_below = (total_below_time/df.TotalTime[i])*100.
         else: 
             lifetime_pct_below = 0.
         if lifetime_pct_below <= 10:
-            pdffiles.append(workdir+'/'+df.Target[i]+'_'+df.StartTime+'_'+df.EndTime+'.txt') # STOPPED 11 Oct 2018: I know this is going to break the workflow so let's fix it tomorrow: need to add a section to this script that requests & names PDF files according to this convention.  Currently assumes we've already requested PDF files, but why bother requesting the ones we don't want?
-# although maybe I should make some kind of option to not re-request a file if it already exists on disk
+            pdffiles.append(workdir+'/'+df.Target[i]+'_'+df.StartTime+'_'+df.EndTime+'.txt') 
+# maybe I should make some kind of option to not re-request a file if it already exists on disk
 # and to deal w/not using certain PDF files if they don't match the list returned here...like if we've already downloaded the file but I decide to add an option to change the pct_below_nlnm value??
 # might also be good to store a list of targets/times we want so can re-start w/o nlnm check 
             usedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
@@ -118,14 +110,13 @@ def checkAboveLNM(df):
 
         print(df.Target[i], '% days in lifetime >10% below LNM:', lifetime_pct_below)
 
-
     usedfile.close()
     notusedfile.close()
     np.save('useindices.npy', useindex)
     df_selected = df.iloc[useindex]
     df_selected.to_csv('irisfedcat_selected.txt', index=False, sep='|')
-#    return pdffiles
     return df_selected
+####################################
 
 # write out list of all channels used...
 
@@ -140,18 +131,14 @@ df_selected = pd.read_csv('irisfedcat_selected_gt250.txt', sep='|')
 df_selected.rename(columns=lambda x: x.strip(), inplace=True)
 df_selected.rename(columns=lambda x: x.strip('#'), inplace=True) 
 
+####################################
 def requestPDFs(df):
 # to do: add check to see if PDF file of date/time range of interest already exists in outpdfdir?
     outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
     for i in range(len(df.Target)):
         print(df.Target[i])
-        starttime = UTCDateTime(df.StartTime[i])
-        endtime = UTCDateTime(df.EndTime[i])
-        startstring = starttime.date.strftime('%Y-%m-%d')
-# add one day to endstring, bc endtimes often are stored as 23:59:59 so we want to round up
-        endstring = (endtime+86400).date.strftime('%Y-%m-%d') 
         reqbase = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=text&nodata=404'
-        reqstring = reqbase + '&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], startstring, endstring)
+        reqstring = reqbase + '&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
 #        print(reqstring)
         res = requests.get(reqstring)
 #        df2 = pd.read_csv(StringIO(res.text), skiprows=4)
@@ -159,11 +146,13 @@ def requestPDFs(df):
         outfile = open(outname, 'w')
         outfile.write(res.text)
         outfile.close()
+####################################
 
 #requestPDFs(df_selected)
 #sys.exit()
 
 
+####################################
 def listPDFFiles(df):
 # to do: check to see if all pdf files exist in outpdfdir, and if not, request missing ones?
     outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
@@ -176,11 +165,13 @@ def listPDFFiles(df):
 # todo        make slice of dataframe for that pdf file
 # todo        requestPDF()
     return pdffiles
+####################################
 
 pdffiles = listPDFFiles(df_selected)
 
 #print(pdffiles)
 
+####################################
 def findPDFBounds():
     # Get lists of unique frequencies and dbs
     freqfile = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF/freqs_uniq.txt'
@@ -189,7 +180,9 @@ def findPDFBounds():
     dbfile = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF/dbs_uniq.txt'
     db_u = np.loadtxt(dbfile, unpack=True)
     return freq_u, db_u
+####################################
     
+####################################
 def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
     # Set up dictionaries to convert freq and db to integers
     freq_s = [str(f) for f in freq_u ]
@@ -221,6 +214,7 @@ def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
     # Save PDF to a numpy file so we can plot it easily later
     np.save(outpdffile, pdf)
     return pdf
+####################################
 
 freq_u, db_u = findPDFBounds()
 if recalc:
@@ -243,6 +237,7 @@ for i in range(len(freq_u)):
 im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T, cmap=cmap, vmax=.30)
 #ax.set_ylim(-367, 278)
 
+####################################
 def find_percentile(perc):
     db_perc = -999*np.ones(len(freq_u))
     for i in range(len(freq_u)):
@@ -256,6 +251,7 @@ def find_percentile(perc):
                 break
 #        print(freq_u[i], db_perc[i])
     ax.plot(1./freq_u, db_perc, label='{0:.1f}%'.format(100*perc))
+####################################
 
 ax.plot([0.01, 0.3], [-137, -162], 'k--', label='200 sps noise model')
 ax.plot([0.01, 0.731139], [-137,-168.536389686], 'c:', lw=5, label='200 sps noise model')
