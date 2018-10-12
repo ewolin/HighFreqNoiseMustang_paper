@@ -7,6 +7,7 @@ from glob import glob
 import requests
 
 import pandas as pd
+from io import StringIO
 
 from noiseplot import setupPSDPlot
 from obspy.imaging.cm import pqlx
@@ -100,7 +101,9 @@ def checkAboveLNM(df):
             pdffiles.append(workdir+'/'+df.Target[i]+'_'+df.StartTime+'_'+df.EndTime+'.txt') # STOPPED 11 Oct 2018: I know this is going to break the workflow so let's fix it tomorrow: need to add a section to this script that requests & names PDF files according to this convention.  Currently assumes we've already requested PDF files, but why bother requesting the ones we don't want?
 # although maybe I should make some kind of option to not re-request a file if it already exists on disk
 # and to deal w/not using certain PDF files if they don't match the list returned here...like if we've already downloaded the file but I decide to add an option to change the pct_below_nlnm value??
+# might also be good to store a list of targets/times we want so can re-start w/o nlnm check 
             usedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
+            useindex.append(i)
         else:
             notusedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
 
@@ -109,20 +112,64 @@ def checkAboveLNM(df):
 
     usedfile.close()
     notusedfile.close()
-    return pdffiles
+    np.save('useindices.npy', useindex)
+    df_selected = df.iloc[useindex]
+    df_selected.to_csv('irisfedcat_selected.txt', index=False, sep='|')
+#    return pdffiles
+    return df_selected
 
 # write out list of all channels used...
 
 #pdffiles = checkAboveLNM(targets, channel_startdates, channel_enddates)
-pdffiles = checkAboveLNM(df)
-# or if we don't want to wait for re-requested data
-# last request: don't use anything that's >10% below LNM for more than 20% of lifetime
-#usedfile = open('used.txt') 
-#lines = usedfile.readlines()
-#pdffiles = [ workdir+'/'+i.split()[0]+'.txt' for i in lines ]
-#usedfile.close()
+#pdffiles = checkAboveLNM(df)
+#df_selected = checkAboveLNM(df)
 
-print(pdffiles)
+# or if we've already run checkAboveLNM and already have a 'selected' file:
+#df_selected = pd.read_csv('irisfedcat_selected.txt', sep='|')
+#df_selected = pd.read_csv('irisfedcat_selected_gt200.txt', sep='|')
+df_selected = pd.read_csv('irisfedcat_selected_gt250.txt', sep='|')
+df_selected.rename(columns=lambda x: x.strip(), inplace=True)
+df_selected.rename(columns=lambda x: x.strip('#'), inplace=True) 
+
+def requestPDFs(df):
+    outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
+    for i in range(len(df.Target)):
+        print(df.Target[i])
+        starttime = UTCDateTime(df.StartTime[i])
+        endtime = UTCDateTime(df.EndTime[i])
+        startstring = starttime.date.strftime('%Y-%m-%d')
+# add one day to endstring, bc endtimes often are stored as 23:59:59 so we want to round up
+        endstring = (endtime+86400).date.strftime('%Y-%m-%d') 
+        reqbase = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=text&nodata=404'
+        reqstring = reqbase + '&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], startstring, endstring)
+#        print(reqstring)
+        res = requests.get(reqstring)
+#        df2 = pd.read_csv(StringIO(res.text), skiprows=4)
+        outname = outpdfdir+'/{0}_{1}_{2}.txt'.format(df.Target[i], startstring, endstring)
+        outfile = open(outname, 'w')
+        outfile.write(res.text)
+        outfile.close()
+
+#requestPDFs(df_selected)
+#sys.exit()
+
+def listPDFFiles(df):
+    outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
+    pdffiles = []
+    for i in range(len(df.Target)):
+        starttime = UTCDateTime(df.StartTime[i])
+        endtime = UTCDateTime(df.EndTime[i])
+        startstring = starttime.date.strftime('%Y-%m-%d')
+# add one day to endstring, bc endtimes often are stored as 23:59:59 so we want to round up
+        endstring = (endtime+86400).date.strftime('%Y-%m-%d') 
+        pdffile = outpdfdir+'/'+df.Target[i]+'_'+startstring+'_'+endstring+'.txt'
+        pdffiles.append(pdffile)
+    return pdffiles
+
+pdffiles = listPDFFiles(df_selected)
+
+
+#print(pdffiles)
 
 def findPDFBounds():
     # Get lists of unique frequencies and dbs
