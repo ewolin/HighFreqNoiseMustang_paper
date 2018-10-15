@@ -2,6 +2,7 @@
 # NOTE: run getlistoffreqs.sh to make freqlist_uniq.txt and dblist_uniq.txt first!
 
 import sys
+import os.path
 import numpy as np
 from glob import glob
 import requests
@@ -21,14 +22,6 @@ if len(sys.argv) > 1:
 else:
     recalc = False
 
-workdir = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF'
-
-
-# Read text file returned from IRIS' fedcat service to build list of channel on/off dates
-# consider using requests to get the fedcat file, and maybe process directly with pandas, instead of requesting w/a separate shell script?
-infile = workdir+'/irisfedcat_HZ_gt200.txt'
-df = readIRISfedcat(infile)
-useindex = []
 
 ####################################
 def readIRISfedcat(fedcatfile):
@@ -36,6 +29,10 @@ def readIRISfedcat(fedcatfile):
     df = pd.read_csv(fedcatfile, sep='|')
     df.rename(columns=lambda x: x.strip(), inplace=True)
     df.rename(columns=lambda x: x.strip('#'), inplace=True)
+
+# check for junk row with datacenter comment and delete it
+    if df.iloc[0].Network[0] == '#':
+        df = df.drop(0).reset_index(drop=True)
 
 # Replace NaN Locations with a blank character
     df = df.replace(pd.np.nan, '')
@@ -55,10 +52,11 @@ def readIRISfedcat(fedcatfile):
 
     starttimes = pd.to_datetime(df.StartTime)
 
-# replace 2599 dates BEFORE converting to datetime to avoid errors
+# errors = 'coerce' makes overflow values (2500, 2599, 2999 etc) get set to pd.NaT 
 # then convert, and replace all future dates w/stopdate
-    endtimes = pd.to_datetime(df.EndTime.replace(to_replace='2599-12-31T23:59:59', value=stopstring)) 
+    endtimes = pd.to_datetime(df.EndTime, errors='coerce') 
     endtimes[endtimes > stopdate ] = stopdate
+    endtimes = endtimes.replace(pd.NaT, stopdate)
 
     df['StartDate'] = starttimes.dt.strftime('%Y-%m-%d')
     df['EndDate'] = endtimes.dt.ceil('D').dt.strftime('%Y-%m-%d')
@@ -67,6 +65,46 @@ def readIRISfedcat(fedcatfile):
 
     return df
 ####################################
+
+
+####################################
+def getIRISfedcat():
+# use requests to get fedcat file...
+# in bash: used
+# curl "http://service.iris.edu/irisws/fedcatalog/1/query?net=*&cha=HHZ,CHZ,DHZ,EHZ&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC" > irisfedcat.txt
+    reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net=*&cha=*HZ&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'
+    print('requesting list of stations')
+    res = requests.get(reqstring)
+    outname = 'irisfedcat_allHZ.txt'
+    outfile = open(outname, 'w')
+    outfile.write(res.text)
+    outfile.close()
+
+# parse returned text just like we'd read a CSV
+    df = readIRISfedcat(StringIO(res.text))
+
+# get only sample rates >= 200 sps, remember to reset indices!!
+    df = df[df.SampleRate >= 200].reset_index(drop=True)
+    df.to_csv('irisfedcat_allHZ_ge200.txt', sep='|', index=False)
+#    print(df.Target)
+# surely we can do this with requests, StringIO, and pandas...
+    return df
+####################################    
+
+workdir = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF'
+
+
+# Read text file returned from IRIS' fedcat service to build list of channel on/off dates
+# consider using requests to get the fedcat file, and maybe process directly with pandas, instead of requesting w/a separate shell script?
+#infile = workdir+'/irisfedcat_HZ_gt200.txt'
+#infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_HZ_gt200_small.txt'
+#infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/savehere.csv'
+#infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_allHZ_ge200.txt'
+#df = readIRISfedcat(infile)
+#kdf = df[df.SampleRate >= 200]
+df = getIRISfedcat()
+#df = df[0:5]
+useindex = []
 
 ####################################
 def checkAboveLNM(df): 
@@ -99,7 +137,7 @@ def checkAboveLNM(df):
         else: 
             lifetime_pct_below = 0.
         if lifetime_pct_below <= 10:
-            pdffiles.append(workdir+'/'+df.Target[i]+'_'+df.StartTime+'_'+df.EndTime+'.txt') 
+            #pdffiles.append(workdir+'/'+df.Target[i]+'_'+df.StartTime+'_'+df.EndTime+'.txt') 
 # maybe I should make some kind of option to not re-request a file if it already exists on disk
 # and to deal w/not using certain PDF files if they don't match the list returned here...like if we've already downloaded the file but I decide to add an option to change the pct_below_nlnm value??
 # might also be good to store a list of targets/times we want so can re-start w/o nlnm check 
@@ -122,33 +160,35 @@ def checkAboveLNM(df):
 
 #pdffiles = checkAboveLNM(targets, channel_startdates, channel_enddates)
 #pdffiles = checkAboveLNM(df)
-#df_selected = checkAboveLNM(df)
+df_selected = checkAboveLNM(df)
 
 # or if we've already run checkAboveLNM to produce a 'selected' file (or we've made it some other way): 
 #df_selected = pd.read_csv('irisfedcat_selected.txt', sep='|')
 #df_selected = pd.read_csv('irisfedcat_selected_gt200.txt', sep='|')
-df_selected = pd.read_csv('irisfedcat_selected_gt250.txt', sep='|')
-df_selected.rename(columns=lambda x: x.strip(), inplace=True)
-df_selected.rename(columns=lambda x: x.strip('#'), inplace=True) 
+#df_selected = readIRISfedcat('irisfedcat_selected_gt250.txt')
 
 ####################################
 def requestPDFs(df):
-# to do: add check to see if PDF file of date/time range of interest already exists in outpdfdir?
+# request PDF PSDs from MUSTANG
+# but first check to see if PDF file of date/time range of interest already exists in outpdfdir
     outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
     for i in range(len(df.Target)):
-        print(df.Target[i])
-        reqbase = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=text&nodata=404'
-        reqstring = reqbase + '&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
+        outname = outpdfdir+'/{0}_{1}_{2}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
+        if not os.path.exists(outname):
+            print('requesting PDF PSD for:', df.Target[i])
+            reqbase = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=text&nodata=404'
+            reqstring = reqbase + '&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
 #        print(reqstring)
-        res = requests.get(reqstring)
+            res = requests.get(reqstring)
 #        df2 = pd.read_csv(StringIO(res.text), skiprows=4)
-        outname = outpdfdir+'/{0}_{1}_{2}.txt'.format(df.Target[i], startstring, endstring)
-        outfile = open(outname, 'w')
-        outfile.write(res.text)
-        outfile.close()
+            outfile = open(outname, 'w')
+            outfile.write(res.text)
+            outfile.close()
+        else:
+            print('PDF PSD file exists, will not re-request for {0}'.format(df.Target[i]))
 ####################################
 
-#requestPDFs(df_selected)
+requestPDFs(df_selected)
 #sys.exit()
 
 
@@ -158,7 +198,7 @@ def listPDFFiles(df):
     outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
     pdffiles = []
     for i in range(len(df.Target)):
-        pdffile = outpdfdir+'/'+df.Target[i]+'_'+df.StartDate+'_'+df.EndDate+'.txt'
+        pdffile = outpdfdir+'/'+df.Target[i]+'_'+df.StartDate[i]+'_'+df.EndDate[i]+'.txt'
 # todo        if pdffile exists:
         pdffiles.append(pdffile)
 # todo    else:
@@ -195,7 +235,7 @@ def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
     
     # Make mega-pdf
     for infile in pdffiles:
-        print(infile.split('/')[-1])
+        print('adding to PDF:',infile.split('/')[-1])
     # Read input file
         try:
             freq = np.loadtxt(infile, unpack=True, delimiter=',', usecols=0)
@@ -228,7 +268,7 @@ fig, ax = setupPSDPlot()
 
 newpdf_norm = np.zeros(shape=pdf.shape, dtype=np.float_)
 for i in range(len(freq_u)):
-    print(freq_u[i], np.sum(pdf[i,:]))
+#    print(freq_u[i], np.sum(pdf[i,:]))
     if np.sum(pdf[i,:]) > 0:
         newpdf_norm[i,:] = pdf[i,:]/np.sum(pdf[i,:])
     else:
@@ -259,7 +299,7 @@ ax.plot([0.01, 1], [-137,-170.849624626], 'y:', lw=2, label='200 sps noise model
 dlogperiod = np.log10(0.3) - np.log10(0.01)
 ddb = -137 - -162
 y = -137 + ddb/dlogperiod * (np.log10(0.01)-np.log10(0.73))
-print(y)
+#print(y)
 #ax.plot(1, y, 'ko')
 
 ax.grid()
