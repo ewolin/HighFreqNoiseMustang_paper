@@ -15,14 +15,6 @@ from obspy.imaging.cm import pqlx
 from obspy import UTCDateTime
 import matplotlib.pyplot as plt
 
-args = sys.argv
-if len(sys.argv) > 1:
-    if sys.argv[1] == 'recalc':
-        recalc = True
-else:
-    recalc = False
-
-
 ####################################
 def readIRISfedcat(fedcatfile):
 # read file returned by fedcat, clean up headers, add columns holding start/end y-m-d for MUSTANG requests
@@ -87,7 +79,6 @@ def readIRISfedcat(fedcatfile):
     return df
 ####################################
 
-
 ####################################
 def getIRISfedcat():
 # use requests to get fedcat file...
@@ -112,21 +103,6 @@ def getIRISfedcat():
     return df
 ####################################    
 
-workdir = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF'
-
-
-# Read text file returned from IRIS' fedcat service to build list of channel on/off dates
-#infile = workdir+'/irisfedcat_HZ_gt200.txt'
-infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_HZ_gt200_small2.txt'
-#infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/savehere.csv'
-#infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_allHZ_ge200.txt'
-df = readIRISfedcat(infile)
-print(df.Target[0])
-#kdf = df[df.SampleRate >= 200]
-#df = getIRISfedcat()
-#df = df[0:5]
-useindex = []
-
 ####################################
 # TO DO: catch errors in requesting data and find a way to gracefully restart after errors instead of re-requesting everything
 def checkAboveLNM(df, getplots=False): 
@@ -138,7 +114,7 @@ def checkAboveLNM(df, getplots=False):
        Target (string, N.S.L.C.Q)
        StartDate (string, YYYY-MM-DD)
        EndDate (string, YYYY-MM-DD)'''
-    pdffiles = []
+    useindex = []
     notusedfile = open('notused.txt', 'w')
     usedfile = open('used.txt', 'w')
     value_gt = 10.0
@@ -164,12 +140,12 @@ def checkAboveLNM(df, getplots=False):
 
         below_startdates = []
         below_enddates = []
+# pct_below_nlnm returns text w/2 header lines
+# and only returns days where pct_below_nlnm > 0 
         text = res.text.split('\n')[2:-1]
         text2 = [k.split(',') for k in text]
-#        print(text2)
         if len(text2) > 0:
             for t in text2:
-                #print(t)
                 s1 = UTCDateTime(t[2].strip('"'))
                 e1 = UTCDateTime(t[3].strip('"'))
                 below_startdates.append(s1)
@@ -197,34 +173,6 @@ def checkAboveLNM(df, getplots=False):
     return df_selected
 ####################################
 
-# write out list of all channels used...
-
-#pdffiles = checkAboveLNM(targets, channel_startdates, channel_enddates)
-#pdffiles = checkAboveLNM(df)
-
-#df_selected = checkAboveLNM(df)
-
-resume_lnm_check = False
-if resume_lnm_check:
-# find target+start/end time that we checked
-    df_checked_already = pd.read_csv('used.txt', names=['Target', 'StartTime', 'EndTime'], sep=' ')
-    lastnscl = df_checked_already.iloc[-1].Target
-    laststart = df_checked_already.iloc[-1].StartTime
-    lastend = df_checked_already.iloc[-1].EndTime
-    i_restart = df[(df.Target == lastnscl) & (df.StartTime == laststart) & (df.EndTime == lastend)].index
-    print('restarting from', i_restart)
-    df_restart = df.loc[i_restart:]
-    df_selected = checkAboveLNM(df_restart)
-    df_selected = df[:i_restart-1].append(df_selected)
-else:
-    df_selected = checkAboveLNM(df)
-    
-
-# or if we've already run checkAboveLNM to produce a 'selected' file (or we've made it some other way): 
-#df_selected = pd.read_csv('irisfedcat_selected.txt', sep='|')
-#df_selected = pd.read_csv('irisfedcat_selected_gt200.txt', sep='|')
-#df_selected = readIRISfedcat('irisfedcat_selected_gt250.txt')
-
 ####################################
 def requestPDFs(df):
 # request PDF PSDs from MUSTANG
@@ -247,10 +195,6 @@ def requestPDFs(df):
             print('PDF PSD file exists, will not re-request for {0}'.format(df.Target[i]))
 ####################################
 
-requestPDFs(df_selected)
-#sys.exit()
-
-
 ####################################
 def listPDFFiles(df):
 # to do: check to see if all pdf files exist in outpdfdir, and if not, request missing ones?
@@ -266,11 +210,8 @@ def listPDFFiles(df):
     return pdffiles
 ####################################
 
-pdffiles = listPDFFiles(df_selected)
-
-#print(pdffiles)
-
 ####################################
+# TO DO: find freq bounds in Python!!
 def findPDFBounds():
     # Get lists of unique frequencies and dbs
     freqfile = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF/freqs_uniq.txt'
@@ -315,62 +256,126 @@ def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
     return pdf
 ####################################
 
-freq_u, db_u = findPDFBounds()
-if recalc:
-    pdf = calcMegaPDF(freq_u, db_u, pdffiles)
-else:
-    pdf = np.load('megapdf.npy')
-
-# Plot PDF
-cmap = pqlx
-fig, ax = setupPSDPlot()
-
-newpdf_norm = np.zeros(shape=pdf.shape, dtype=np.float_)
-for i in range(len(freq_u)):
-#    print(freq_u[i], np.sum(pdf[i,:]))
-    if np.sum(pdf[i,:]) > 0:
-        newpdf_norm[i,:] = pdf[i,:]/np.sum(pdf[i,:])
-    else:
-        newpdf_norm[i,:] = pdf[i,:]*1e-10 # np.nan*pdf[i,:]
-
-im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T, cmap=cmap, vmax=.30)
-#ax.set_ylim(-367, 278)
-
 ####################################
-def find_percentile(perc):
-    db_perc = -999*np.ones(len(freq_u))
-    for i in range(len(freq_u)):
+def find_percentile(freq_u, db_u, newpdf_norm, perc, ax):
+#    db_perc = -999*np.ones(len(freq_u))
+    nfreq = len(freq_u)
+    db_perc = -999*np.ones(nfreq) 
+    for i in range(nfreq):
         fslice = newpdf_norm[i,:]
         dum = 0
         for j in range(len(fslice)):
             dum += fslice[j]
             if(dum >= perc):
                 db_perc[i] = db_u[j]
-#                print(dum)
                 break
-#        print(freq_u[i], db_perc[i])
     ax.plot(1./freq_u, db_perc, label='{0:.1f}%'.format(100*perc))
 ####################################
 
-ax.plot([0.01, 0.3], [-137, -162], 'k--', label='200 sps noise model')
-ax.plot([0.01, 0.731139], [-137,-168.536389686], 'c:', lw=5, label='200 sps noise model')
-ax.plot([0.01, 1], [-137,-170.849624626], 'y:', lw=2, label='200 sps noise model')
-dlogperiod = np.log10(0.3) - np.log10(0.01)
-ddb = -137 - -162
-y = -137 + ddb/dlogperiod * (np.log10(0.01)-np.log10(0.73))
-#print(y)
-#ax.plot(1, y, 'ko')
+def main():
+    args = sys.argv
+    if len(sys.argv) > 1:
+        if sys.argv[1] == 'recalc':
+            recalc = True
+    else:
+        recalc = False
+        
+    workdir = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF'
 
-ax.grid()
 
-find_percentile(0.01)
-find_percentile(0.02)
-find_percentile(0.1)
-find_percentile(0.5)
-find_percentile(0.9)
-#find_percentile(1.0)
+# Read text file returned from IRIS' fedcat service to build list of channel on/off dates
+    #infile = workdir+'/irisfedcat_HZ_gt200.txt'
+    infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_HZ_gt200_small2.txt'
+    #infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/savehere.csv'
+    #infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_allHZ_ge200.txt'
+    df = readIRISfedcat(infile)
+    print(df.Target[0])
+    #df = getIRISfedcat()
 
-ax.legend(ncol=3, loc='lower center', fontsize='small')
-ax.set_xlim(0.005,10)
-#ax.set_xlim(0.01,10)
-fig.savefig('meh.png')
+    
+    # write out list of all channels used...
+    
+    #df_selected = checkAboveLNM(df)
+    
+    resume_lnm_check = False
+    if resume_lnm_check:
+    # find target+start/end time that we checked
+        df_checked_already = pd.read_csv('used.txt', names=['Target', 'StartTime', 'EndTime'], sep=' ')
+        lastnscl = df_checked_already.iloc[-1].Target
+        laststart = df_checked_already.iloc[-1].StartTime
+        lastend = df_checked_already.iloc[-1].EndTime
+        i_restart = df[(df.Target == lastnscl) & (df.StartTime == laststart) & (df.EndTime == lastend)].index
+        print('restarting from', i_restart)
+        df_restart = df.loc[i_restart:]
+        df_selected = checkAboveLNM(df_restart)
+        df_selected = df[:i_restart-1].append(df_selected)
+    else:
+        df_selected = checkAboveLNM(df)
+        
+
+    
+# or if we've already run checkAboveLNM to produce a 'selected' file (or we've made it some other way): 
+    #df_selected = pd.read_csv('irisfedcat_selected.txt', sep='|')
+    #df_selected = pd.read_csv('irisfedcat_selected_gt200.txt', sep='|')
+    #df_selected = readIRISfedcat('irisfedcat_selected_gt250.txt')
+
+    
+    requestPDFs(df_selected)
+    #sys.exit()
+
+    pdffiles = listPDFFiles(df_selected)
+
+    #print(pdffiles)
+
+
+# Find min/max freqs and dBs and sum PDFs    
+    freq_u, db_u = findPDFBounds()
+    if recalc:
+        pdf = calcMegaPDF(freq_u, db_u, pdffiles)
+    else:
+        pdf = np.load('megapdf.npy')
+
+    
+    
+    # Plot PDF
+    cmap = pqlx
+    fig, ax = setupPSDPlot()
+    
+    newpdf_norm = np.zeros(shape=pdf.shape, dtype=np.float_)
+# normalize PDF since MUSTANG returns hit counts not %
+    for i in range(len(freq_u)):
+    #    print(freq_u[i], np.sum(pdf[i,:]))
+        if np.sum(pdf[i,:]) > 0:
+            newpdf_norm[i,:] = pdf[i,:]/np.sum(pdf[i,:])
+        else:
+            newpdf_norm[i,:] = pdf[i,:]*1e-10 # np.nan*pdf[i,:]
+    
+    im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T, cmap=cmap, vmax=.30)
+    #ax.set_ylim(-367, 278)
+    
+# Plot PDF and save    
+    ax.plot([0.01, 0.3], [-137, -162], 'k--', label='200 sps noise model')
+    ax.plot([0.01, 0.731139], [-137,-168.536389686], 'c:', lw=5, label='200 sps noise model')
+    ax.plot([0.01, 1], [-137,-170.849624626], 'y:', lw=2, label='200 sps noise model')
+    dlogperiod = np.log10(0.3) - np.log10(0.01)
+    ddb = -137 - -162
+    y = -137 + ddb/dlogperiod * (np.log10(0.01)-np.log10(0.73))
+    #print(y)
+    #ax.plot(1, y, 'ko')
+    
+    ax.grid()
+    
+    find_percentile(freq_u, db_u, newpdf_norm, 0.01, ax)
+    find_percentile(freq_u, db_u, newpdf_norm, 0.02, ax)
+    find_percentile(freq_u, db_u, newpdf_norm, 0.1, ax)
+    find_percentile(freq_u, db_u, newpdf_norm, 0.5, ax)
+    find_percentile(freq_u, db_u, newpdf_norm, 0.9, ax)
+    #find_percentile(newpdf_norm, 1.0)
+    
+    ax.legend(ncol=3, loc='lower center', fontsize='small')
+    ax.set_xlim(0.005,10)
+    #ax.set_xlim(0.01,10)
+    fig.savefig('meh.png')
+
+if __name__ == "__main__":
+    main()
