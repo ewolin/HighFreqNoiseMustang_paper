@@ -116,7 +116,6 @@ workdir = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF'
 
 
 # Read text file returned from IRIS' fedcat service to build list of channel on/off dates
-# consider using requests to get the fedcat file, and maybe process directly with pandas, instead of requesting w/a separate shell script?
 #infile = workdir+'/irisfedcat_HZ_gt200.txt'
 infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_HZ_gt200_small2.txt'
 #infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/savehere.csv'
@@ -130,34 +129,39 @@ useindex = []
 
 ####################################
 # TO DO: catch errors in requesting data and find a way to gracefully restart after errors instead of re-requesting everything
-def checkAboveLNM(df): 
+def checkAboveLNM(df, getplots=False): 
+    '''For each Target and Start/EndTime in the dataframe,
+       request pct_below_nlnm metric from IRIS MUSTANG
+       and check that the # of days below a given percentange do not exceed
+       the specified % of the station lifetime.
+       df should be a pandas dataframe with AT MINIMUM the following columns:
+       Target (string, N.S.L.C.Q)
+       StartDate (string, YYYY-MM-DD)
+       EndDate (string, YYYY-MM-DD)'''
     pdffiles = []
     notusedfile = open('notused.txt', 'w')
     usedfile = open('used.txt', 'w')
-    for i in df.index: # range(len(df.Target)):
-    # for each channel, request pct_below_nlnm metric
-        #value_gt = 10
-        print(df.Target[i])
-        value_gt = 0.0
+    value_gt = 10.0
+    for i in df.index: 
         reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
         reqstring = reqbase+'&target={0}&value_gt={1}&start={2}&end={3}'.format(df.Target[i],value_gt,df.StartDate[i],df.EndDate[i])
         res = requests.get(reqstring)
         print(reqstring)
-# get pdf psd plots too for QC
-        reqbase2 = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=plot&nodata=404'
-        reqstring2 = reqbase2+'&target={0}&starttime={1}&endtime={2}'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
-        res2 = requests.get(reqstring2)
-        imgfile = open(df.Target[i]+'_'+df.StartDate[i]+'_'+df.EndDate[i]+'.png', 'wb')
-        if res2.status_code == 200:
-            for chunk in res2:
-                imgfile.write(chunk)
-        else:
-            print(res2.status_code)
-            print(reqstring2)
-        imgfile.close()
 
+        # get pdf psd plots too for QC
+        if getplots:
+            reqbase2 = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=plot&nodata=404'
+            reqstring2 = reqbase2+'&target={0}&starttime={1}&endtime={2}'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
+            res2 = requests.get(reqstring2)
+            imgfile = open(df.Target[i]+'_'+df.StartDate[i]+'_'+df.EndDate[i]+'.png', 'wb')
+            if res2.status_code == 200:
+                for chunk in res2:
+                    imgfile.write(chunk)
+            else:
+                print(res2.status_code)
+                print(reqstring2)
+            imgfile.close()
 
- #       print(reqstring)
         below_startdates = []
         below_enddates = []
         text = res.text.split('\n')[2:-1]
@@ -178,10 +182,6 @@ def checkAboveLNM(df):
         else: 
             lifetime_pct_below = 0.
         if lifetime_pct_below <= 10:
-            #pdffiles.append(workdir+'/'+df.Target[i]+'_'+df.StartTime+'_'+df.EndTime+'.txt') 
-# maybe I should make some kind of option to not re-request a file if it already exists on disk
-# and to deal w/not using certain PDF files if they don't match the list returned here...like if we've already downloaded the file but I decide to add an option to change the pct_below_nlnm value??
-# might also be good to store a list of targets/times we want so can re-start w/o nlnm check 
             usedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
             useindex.append(i)
         else:
@@ -192,7 +192,7 @@ def checkAboveLNM(df):
     usedfile.close()
     notusedfile.close()
     np.save('useindices.npy', useindex)
-    df_selected = df.iloc[useindex]
+    df_selected = df.loc[useindex]
     df_selected.to_csv('irisfedcat_selected.txt', index=False, sep='|')
     return df_selected
 ####################################
