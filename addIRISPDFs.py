@@ -26,7 +26,27 @@ else:
 ####################################
 def readIRISfedcat(fedcatfile):
 # read file returned by fedcat, clean up headers, add columns holding start/end y-m-d for MUSTANG requests
-    df = pd.read_csv(fedcatfile, sep='|')
+# specify dtypes explicitly so we know what we're working with later
+# note that we have to give column names including spaces etc. exactly as they're specified in IRIS fedcat request
+# before we clean them up using df.rename
+    use_dtypes = {'#Network' : 'str',
+                  ' Station ' : 'str',
+                  ' Location ' : 'str',
+                  ' Channel ' : 'str',
+                  ' Latitude ' : 'np.float64',
+                  ' Longitude ' : 'np.float64', 
+                  ' Elevation ' : 'np.float64',
+                  ' Depth ' : 'np.float64',
+                  ' Azimuth ' : 'np.float64',
+                  ' Dip ' : 'np.float64', 
+                  ' SensorDescription ' : 'str',
+                  ' Scale ' : 'np.float64',
+                  ' ScaleFreq ' : 'np.float64',
+                  ' ScaleUnits' : 'str',
+                  ' SampleRate ' : 'int',
+                  ' StartTime ' : 'str',
+                  ' EndTime ' : 'str'}
+    df = pd.read_csv(fedcatfile, sep='|', dtype={' Location ':'str'})
     df.rename(columns=lambda x: x.strip(), inplace=True)
     df.rename(columns=lambda x: x.strip('#'), inplace=True)
 
@@ -35,6 +55,7 @@ def readIRISfedcat(fedcatfile):
         df = df.drop(0).reset_index(drop=True)
 
 # Replace NaN Locations with a blank character
+    print(df.Location)
     df = df.replace(pd.np.nan, '')
 
 # Make a new column w/NSCLQ target for MUSTANG
@@ -97,25 +118,45 @@ workdir = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF'
 # Read text file returned from IRIS' fedcat service to build list of channel on/off dates
 # consider using requests to get the fedcat file, and maybe process directly with pandas, instead of requesting w/a separate shell script?
 #infile = workdir+'/irisfedcat_HZ_gt200.txt'
-#infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_HZ_gt200_small.txt'
+infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_HZ_gt200_small2.txt'
 #infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/savehere.csv'
 #infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_allHZ_ge200.txt'
-#df = readIRISfedcat(infile)
+df = readIRISfedcat(infile)
+print(df.Target[0])
 #kdf = df[df.SampleRate >= 200]
-df = getIRISfedcat()
+#df = getIRISfedcat()
 #df = df[0:5]
 useindex = []
 
 ####################################
+# TO DO: catch errors in requesting data and find a way to gracefully restart after errors instead of re-requesting everything
 def checkAboveLNM(df): 
     pdffiles = []
     notusedfile = open('notused.txt', 'w')
     usedfile = open('used.txt', 'w')
-    for i in range(len(df.Target)):
+    for i in df.index: # range(len(df.Target)):
     # for each channel, request pct_below_nlnm metric
+        #value_gt = 10
+        print(df.Target[i])
+        value_gt = 0.0
         reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
-        reqstring = reqbase+'&target={0}&value_gt=10&start={1}&end={2}'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
+        reqstring = reqbase+'&target={0}&value_gt={1}&start={2}&end={3}'.format(df.Target[i],value_gt,df.StartDate[i],df.EndDate[i])
         res = requests.get(reqstring)
+        print(reqstring)
+# get pdf psd plots too for QC
+        reqbase2 = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=plot&nodata=404'
+        reqstring2 = reqbase2+'&target={0}&starttime={1}&endtime={2}'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
+        res2 = requests.get(reqstring2)
+        imgfile = open(df.Target[i]+'_'+df.StartDate[i]+'_'+df.EndDate[i]+'.png', 'wb')
+        if res2.status_code == 200:
+            for chunk in res2:
+                imgfile.write(chunk)
+        else:
+            print(res2.status_code)
+            print(reqstring2)
+        imgfile.close()
+
+
  #       print(reqstring)
         below_startdates = []
         below_enddates = []
@@ -146,7 +187,7 @@ def checkAboveLNM(df):
         else:
             notusedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
 
-        print(df.Target[i], '% days in lifetime >10% below LNM:', lifetime_pct_below)
+        print(df.Target[i], '% days in lifetime >{0}% below LNM:'.format(value_gt), lifetime_pct_below)
 
     usedfile.close()
     notusedfile.close()
@@ -160,7 +201,24 @@ def checkAboveLNM(df):
 
 #pdffiles = checkAboveLNM(targets, channel_startdates, channel_enddates)
 #pdffiles = checkAboveLNM(df)
-df_selected = checkAboveLNM(df)
+
+#df_selected = checkAboveLNM(df)
+
+resume_lnm_check = False
+if resume_lnm_check:
+# find target+start/end time that we checked
+    df_checked_already = pd.read_csv('used.txt', names=['Target', 'StartTime', 'EndTime'], sep=' ')
+    lastnscl = df_checked_already.iloc[-1].Target
+    laststart = df_checked_already.iloc[-1].StartTime
+    lastend = df_checked_already.iloc[-1].EndTime
+    i_restart = df[(df.Target == lastnscl) & (df.StartTime == laststart) & (df.EndTime == lastend)].index
+    print('restarting from', i_restart)
+    df_restart = df.loc[i_restart:]
+    df_selected = checkAboveLNM(df_restart)
+    df_selected = df[:i_restart-1].append(df_selected)
+else:
+    df_selected = checkAboveLNM(df)
+    
 
 # or if we've already run checkAboveLNM to produce a 'selected' file (or we've made it some other way): 
 #df_selected = pd.read_csv('irisfedcat_selected.txt', sep='|')
@@ -172,7 +230,8 @@ def requestPDFs(df):
 # request PDF PSDs from MUSTANG
 # but first check to see if PDF file of date/time range of interest already exists in outpdfdir
     outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
-    for i in range(len(df.Target)):
+    for i in df.index: #range(len(df.Target)):
+        print(i, df.Target[i])
         outname = outpdfdir+'/{0}_{1}_{2}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
         if not os.path.exists(outname):
             print('requesting PDF PSD for:', df.Target[i])
@@ -197,7 +256,7 @@ def listPDFFiles(df):
 # to do: check to see if all pdf files exist in outpdfdir, and if not, request missing ones?
     outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
     pdffiles = []
-    for i in range(len(df.Target)):
+    for i in df.index: #range(len(df.Target)):
         pdffile = outpdfdir+'/'+df.Target[i]+'_'+df.StartDate[i]+'_'+df.EndDate[i]+'.txt'
 # todo        if pdffile exists:
         pdffiles.append(pdffile)
