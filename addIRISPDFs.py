@@ -72,7 +72,7 @@ def readIRISfedcat(fedcatfile):
                   ' Scale ' : np.float64,
                   ' ScaleFreq ' : np.float64,
                   ' ScaleUnits ' : 'str',
-                  ' SampleRate ' : 'int',
+                  ' SampleRate ' : np.float64,
                   ' StartTime ' : 'str',
                   ' EndTime ' : 'str',
                   'Network' : 'str',
@@ -89,7 +89,7 @@ def readIRISfedcat(fedcatfile):
                   'Scale' : np.float64,
                   'ScaleFreq' : np.float64,
                   'ScaleUnits' : 'str',
-                  'SampleRate' : 'int',
+                  'SampleRate' : np.float64,
                   'StartTime' : 'str',
                   'EndTime' : 'str'}
     df = pd.read_csv(fedcatfile, sep='|', dtype=use_dtypes)
@@ -176,7 +176,7 @@ def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'):
     usedfile = open('used.txt', 'w')
     for i in df.index: 
         outpbnname = outpbndir+'/{0}_{1}_{2}.txt'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
-        if args.force_get_PDFs or (not os.path.exists(outpbnname):
+        if args.force_get_PDFs or (not os.path.exists(outpbnname)):
             reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
             reqstring = reqbase+'&target={0}&value_gt={1}&start={2}&end={3}'.format(df.Target[i],config['daily_perc_cutoff'],df.StartDate[i],df.EndDate[i])
             res = requests.get(reqstring)
@@ -250,6 +250,8 @@ def requestPDFs(df, outpdfdir):
 # request PDF PSDs from MUSTANG
 # but first check to see if PDF file of date/time range of interest already exists in outpdfdir
 #    outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
+    df_successful = df.copy()
+    errorfile = open(outpdfdir+'/error.log', 'w')
     for i in df.index: #range(len(df.Target)):
         print(i, df.Target[i])
         #outname = outpdfdir+'/{0}_{1}_{2}_gt_{3}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
@@ -258,40 +260,48 @@ def requestPDFs(df, outpdfdir):
             print('requesting PDF PSD for:', df.Target[i])
             reqbase = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=text&nodata=404'
             reqstring = reqbase + '&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
-#        print(reqstring)
+            print(reqstring)
             res = requests.get(reqstring)
-#        df2 = pd.read_csv(StringIO(res.text), skiprows=4)
-            outfile = open(outname, 'w')
-            outfile.write(res.text)
-            outfile.close()
+            if res.status_code == 200:
+                outfile = open(outname, 'w')
+                outfile.write(res.text)
+                outfile.close()
+            else: 
+                print(res.status_code)
+                errorfile.write('Error {0}: {1} {2} {3} \n'.format(res.status_code, df.Target[i], df.StartDate[i], df.EndDate[i]))
+                errorfile.write(reqstring+'\n')
+                errorfile.write('\n')
+                df_successful = df_successful.drop(i)
         else:
             print('PDF PSD file exists, will not re-request for {0}'.format(df.Target[i]))
+    df_successful.to_csv('irisfedcat_PDFs-exist.txt', index=False, sep='|')
+    errorfile.close()
+    return df_successful
 ####################################
+
 
 ####################################
 def listPDFFiles(df, outpdfdir):
-# to do: check to see if all pdf files exist in outpdfdir, and if not, request missing ones?
-#    outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
+    '''Make a list of all the PDF PSD files to read based on contents of dataframe '''
     pdffiles = []
-    for i in df.index: #range(len(df.Target)):
+    for i in df.index:
         pdffile = outpdfdir+'/'+df.Target[i]+'_'+df.StartDate[i]+'_'+df.EndDate[i]+'.txt'
-# todo        if pdffile exists:
         pdffiles.append(pdffile)
-# todo    else:
-# todo        make slice of dataframe for that pdf file
-# todo        requestPDF()
     return pdffiles
 ####################################
 
 ####################################
-# TO DO: find freq bounds in Python!!
-def findPDFBounds():
-    # Get lists of unique frequencies and dbs
-    freqfile = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF/freqs_uniq.txt'
-    freq_u = np.loadtxt(freqfile, unpack=True)
-
-    dbfile = '/Users/ewolin/research/NewNewNoise/Get200/GetEachPDF/dbs_uniq.txt'
-    db_u = np.loadtxt(dbfile, unpack=True)
+def findPDFBounds(pdffiles):
+    '''Get lists of unique frequencies and dBs
+       from all individual PDF files'''
+    df_single = pd.read_csv(pdffiles[0], skiprows=5, names=['freq', 'db', 'hits'])
+    freq_u = df_single.freq.unique()
+    db_u = df_single.db.unique()
+    for i in range(1,len(pdffiles)):
+        print(i, pdffiles[i])
+        df_single =  pd.read_csv(pdffiles[i], skiprows=5, names=['freq', 'db', 'hits'])
+        freq_u = np.unique(np.append(freq_u, df_single.freq.unique()))
+        db_u = np.unique(np.append(db_u, df_single.db.unique()))
     return freq_u, db_u
 ####################################
     
@@ -370,7 +380,7 @@ def main():
         args.request_stns = True
         args.lnm_check = True
         args.get_PDFs = True
-        args.recalc_PDF = True
+        args.calc_PDF = True
         args.plot_PDF = True
 
     config = readConfig('config.json')
@@ -400,12 +410,12 @@ def main():
         df_selected = df.copy()
 
     if args.get_PDFs:
-        requestPDFs(df_selected, outpdfdir)
+        df_selected = requestPDFs(df_selected, outpdfdir)
 
     pdffiles = listPDFFiles(df_selected, outpdfdir)
 
 # Find min/max freqs and dBs and sum PDFs    
-    freq_u, db_u = findPDFBounds()
+    freq_u, db_u = findPDFBounds(pdffiles)
     if args.calc_PDF:
         pdf = calcMegaPDF(freq_u, db_u, pdffiles)
     else:
