@@ -160,8 +160,6 @@ def getIRISfedcat(config, outname):
 ####################################    
 
 ####################################
-# TO DO: catch errors in requesting data and find a way to gracefully restart after errors instead of re-requesting everything
-# to do: read config for daily % cutoff and lifetime % cutoff
 def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'): 
     '''For each Target and Start/EndTime in the dataframe,
        request pct_below_nlnm metric from IRIS MUSTANG
@@ -211,7 +209,7 @@ def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'):
         below_startdates = []
         below_enddates = []
 # pct_below_nlnm returns text w/2 header lines
-# and only returns days where pct_below_nlnm > 0 
+# and only returns days where pct_below_nlnm > value_gt (or 0 if value_gt == 0) 
         text2 = [k.split(',') for k in text]
         if len(text2) > 0:
             for t in text2:
@@ -227,15 +225,15 @@ def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'):
         else: 
             lifetime_pct_below = 0.
         if lifetime_pct_below <= config['life_perc_cutoff']:
-            usedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
+            usedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartDate[i], df.EndDate[i]))
             useindex.append(i)
             termcolor=32
         else:
-            notusedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
+            notusedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartDate[i], df.EndDate[i]))
             termcolor=31
 
-#        print(df.Target[i], '% days in lifetime >{0}% below LNM:'.format(value_gt), lifetime_pct_below)
-        print('\033[1;{3};40m {0}: % days in lifetime >{1}% below LNM: {2:.2f}\033[0;37;40m '.format(df.Target[i], config['daily_perc_cutoff'], lifetime_pct_below, termcolor))
+        # fancy color prompt :)
+        print('\033[1;{3};40m {0} {4} {5}: % days in lifetime >{1}% below LNM: {2:.2f}\033[0;37;40m '.format(df.Target[i], config['daily_perc_cutoff'], lifetime_pct_below, termcolor, df.StartDate[i], df.EndDate[i]))
 
     usedfile.close()
     notusedfile.close()
@@ -253,7 +251,7 @@ def requestPDFs(df, outpdfdir):
     df_successful = df.copy()
     errorfile = open(outpdfdir+'/error.log', 'w')
     for i in df.index: #range(len(df.Target)):
-        print(i, df.Target[i])
+        #print(i, df.Target[i])
         #outname = outpdfdir+'/{0}_{1}_{2}_gt_{3}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
         outname = outpdfdir+'/{0}_{1}_{2}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
         if not os.path.exists(outname):
@@ -298,7 +296,7 @@ def findPDFBounds(pdffiles):
     freq_u = df_single.freq.unique()
     db_u = df_single.db.unique()
     for i in range(1,len(pdffiles)):
-        print(i, pdffiles[i])
+        #print(i, pdffiles[i])
         df_single =  pd.read_csv(pdffiles[i], skiprows=5, names=['freq', 'db', 'hits'])
         freq_u = np.unique(np.append(freq_u, df_single.freq.unique()))
         db_u = np.unique(np.append(db_u, df_single.db.unique()))
@@ -332,6 +330,12 @@ def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
                 i_f1 = fd[str(f1)]
                 i_db1 = dbd[db1]
                 pdf[i_f1, i_db1] += hit1
+# tried using pandas to add PDF files but I think it's faster w/loadtxt (the way I did it originally)
+#            df_pdf = pd.read_csv(infile, skiprows=5, names=['freq', 'db', 'hits'], dtype={'freq':'str', 'db':'int', 'hits':'int'})
+#            for i in df_pdf.index:
+#                i_f1 = fd[df_pdf.freq[i]]
+#                i_db1 = dbd[df_pdf.db[i]]
+#                pdf[i_f1, i_db1] += df_pdf.hits[i]
         except:
             pass
     # Save PDF to a numpy file so we can plot it easily later
