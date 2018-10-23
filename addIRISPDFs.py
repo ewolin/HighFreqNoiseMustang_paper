@@ -13,6 +13,7 @@ from io import StringIO
 import json
 
 from noiseplot import setupPSDPlot
+from scipy import stats
 from obspy.imaging.cm import pqlx
 from obspy import UTCDateTime
 import matplotlib.pyplot as plt
@@ -321,6 +322,7 @@ def find_percentile(freq_u, db_u, newpdf_norm, perc, ax):
                 db_perc[i] = db_u[j]
                 break
     ax.plot(1./freq_u, db_perc, label='{0:.1f}%'.format(100*perc))
+    return db_perc
 ####################################
 
 ####################################
@@ -355,20 +357,8 @@ def main():
             print('exists', outdir)
 
 
-# Read text file returned from IRIS' fedcat service to build list of channel on/off dates
-#    infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_HZ_gt200_small2.txt'
-    #infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/savehere.csv'
-    #infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_allHZ_ge200.txt'
-    #df = readIRISfedcat(infile)
-    #print(df.Target[0])
-
     outname = 'irisfedcat_initial.txt'
     df = getIRISfedcat(config, outname)
-
-    
-    # write out list of all channels used...
-    
-    #df_selected = checkAboveLNM(df)
     
     resume_lnm_check = False
     if resume_lnm_check:
@@ -432,16 +422,30 @@ def main():
     #print(y)
     #ax.plot(1, y, 'ko')
 
-    ax.plot([0.01, 0.1], [-91, -91], 'r--', label='GS high noise model')
+    ax.plot([0.01, 0.1], [-91, -91], 'r--', label='GS high noise model?')
     
     ax.grid()
     
     find_percentile(freq_u, db_u, newpdf_norm, 0.01, ax)
-    find_percentile(freq_u, db_u, newpdf_norm, 0.02, ax)
+    y_full = find_percentile(freq_u, db_u, newpdf_norm, 0.02, ax)
+    iwhere, = np.where((freq_u >= 3)&(freq_u<=40))
+    x = freq_u[iwhere]
+    y = y_full[iwhere]
     find_percentile(freq_u, db_u, newpdf_norm, 0.1, ax)
     find_percentile(freq_u, db_u, newpdf_norm, 0.5, ax)
     find_percentile(freq_u, db_u, newpdf_norm, 0.9, ax)
     #find_percentile(newpdf_norm, 1.0)
+
+# need to get db, log(f or T) out of percentiles and do a linear fit
+    print(x)
+    x_log = np.log10(1./x)
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x_log,y)
+    y_new = x_log*slope+intercept
+    plt.plot(1./x, y_new, lw=5, color='pink')
+    print(min(1./x), max(1./x), min(y), max(y))
+    plt.plot(1./x, np.ones(len(x))*-180, lw=10, color='purple')
+   # for i,x in enumerate(x):
+   #     print(x[i], x[i]*slope+intercept)
     
     ax.legend(ncol=3, loc='lower center', fontsize='small')
     ax.set_xlim(0.005,10)

@@ -3,9 +3,12 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 def setupPSDPlot():
-    '''Set up a plot with Peterson noise model for plotting PSD curves '''
-    nhnm = np.loadtxt('/Users/ewolin/Denali-code/code/PST_work/peterson_HNM.mod', unpack=True)
-    nlnm = np.loadtxt('/Users/ewolin/Denali-code/code/PST_work/peterson_LNM.mod', unpack=True)
+    '''Set up a plot with Peterson noise model for plotting PSD curves.
+       x axis = period (s)
+       y axis = decibels '''
+    codedir = '/Users/ewolin/code/HighFreqNoiseMustang'
+    nhnm = np.loadtxt(codedir+'/peterson_HNM.mod', unpack=True)
+    nlnm = np.loadtxt(codedir+'/peterson_LNM.mod', unpack=True)
 
     fig, ax = plt.subplots(figsize=(6.5,6)) 
     ax.plot(nhnm[0], nhnm[1], linewidth=2, color='black')
@@ -13,7 +16,7 @@ def setupPSDPlot():
     ax.semilogx()
     ax.set_xlim(0.05, 200)
     ax.set_xlabel('Period (s)')
-    ax.set_ylabel(r'Power (dB[m^2/s^4/Hz])')
+    ax.set_ylabel(r'Power (dB[m$^2$/s$^4$/Hz])')
     ax.set_ylim(-200, -50)
     return fig, ax
 
