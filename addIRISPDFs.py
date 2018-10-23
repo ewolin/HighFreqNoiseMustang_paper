@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 ####################################
 def readConfig(jsonfile):
     '''Parse JSON configuration file, which should contain:
-       - workdir (can be '.' or path to a directory that MUST ALREADY EXIST)
+       - workdir (can be '.' or path to a directory)
        Several wildcard-able text strings that will be plugged directly into irisws fedcat URL:
        - networks
        - stations
@@ -162,10 +162,10 @@ def getIRISfedcat(config, outname):
 ####################################
 # TO DO: catch errors in requesting data and find a way to gracefully restart after errors instead of re-requesting everything
 # to do: read config for daily % cutoff and lifetime % cutoff
-def checkAboveLNM(df, config, getplots=False, outpbndir='PctBelowNLNM'): 
+def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'): 
     '''For each Target and Start/EndTime in the dataframe,
        request pct_below_nlnm metric from IRIS MUSTANG
-       and check that the # of days below a given percentange do not exceed
+       and check that the # of days below a given percentage do not exceed
        the specified % of the station lifetime.
        df should be a pandas dataframe with AT MINIMUM the following columns:
        Target (string, N.S.L.C.Q)
@@ -176,7 +176,7 @@ def checkAboveLNM(df, config, getplots=False, outpbndir='PctBelowNLNM'):
     usedfile = open('used.txt', 'w')
     for i in df.index: 
         outpbnname = outpbndir+'/{0}_{1}_{2}.txt'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
-        if not os.path.exists(outpbnname):
+        if args.force_get_PDFs or (not os.path.exists(outpbnname):
             reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
             reqstring = reqbase+'&target={0}&value_gt={1}&start={2}&end={3}'.format(df.Target[i],config['daily_perc_cutoff'],df.StartDate[i],df.EndDate[i])
             res = requests.get(reqstring)
@@ -186,7 +186,7 @@ def checkAboveLNM(df, config, getplots=False, outpbndir='PctBelowNLNM'):
             outpbnfile.close()
             text = res.text.split('\n')[2:-1]
         else:
-            print('already requested pct_below_nlnm for {0}, will not re-request'.format(df.Target[i]))
+            print('Will not re-request file for pct_below_nlnm for {0}'.format(df.Target[i]))
             text = open(outpbnname, 'r').readlines()
             print(outpbnname, df.Target[i])
             text = [ line.strip('\n') for line in text ][2:-1]
@@ -212,7 +212,6 @@ def checkAboveLNM(df, config, getplots=False, outpbndir='PctBelowNLNM'):
         below_enddates = []
 # pct_below_nlnm returns text w/2 header lines
 # and only returns days where pct_below_nlnm > 0 
-#        text = res.text.split('\n')[2:-1]
         text2 = [k.split(',') for k in text]
         if len(text2) > 0:
             for t in text2:
@@ -354,11 +353,15 @@ def find_percentile(freq_u, db_u, newpdf_norm, perc, ax):
 ####################################
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--doall", help="Restart from beginning: request stn-epochs, select by sample rate, check below NLNM, request PDFPSDs, sum, and plot", action='store_true')
-    parser.add_argument("--request_stns", help="Request list of stns-epochs defined in config file from IRIS fedcat", action='store_true', default=False)
-    parser.add_argument("--read_stns", help="Read list of stns from a pipe-separated file output by IRIS fedcat webservice")
-    parser.add_argument("--lnm_check", help="Check that PDF PSD values don't drop daily_perc_cutoff below Peterson NLNM for life_perc_cutoff % of lifetime", action='store_true', default=False)
-    parser.add_argument("--get_PDFs", help="request PDF PSDs from MUSTANG for each stn-epoch in dataframe", action='store_true', default=False)
+
+    parser.add_argument("--doall", help="Restart from beginning: request stn-epochs and select by sample rate, check below NLNM, request PDFPSDs, sum, and plot", action='store_true')
+    parser.add_argument("--request_stns", help="Request list of stn-epochs defined in config file from IRIS fedcat", action='store_true', default=False)
+    parser.add_argument("--read_stns", help="Read list of stns from IRIS fedcat webservice (pipe-separated values).  If you do not use --request_stns then you MUST use this argument and supply a filename.")
+    parser.add_argument("--lnm_check", help="Check that PDF PSD values don't drop daily_perc_cutoff below Peterson NLNM for life_perc_cutoff of lifetime", action='store_true', default=False)
+    parser.add_argument("--force_lnm_check", help="Re-request pct_below_nlnm output from MUSTANG even if files already exist in PctBelowNLNM",
+                        action='store_true', default=False)
+    parser.add_argument("--get_PDFs", help="Request text PDF PSDs from MUSTANG for each stn-epoch", action='store_true', default=False)
+    parser.add_argument("--force_get_PDFs", help="Re-request text PDF PSDs from MUSTANG even if files already exist in IndividualPDFs", action='store_true', default=False)
     parser.add_argument("--calc_PDF", help="Sum all PDF PSD files into one composite mega-PDF", action='store_true', default=False)
     parser.add_argument("--plot_PDF", help="Plot composite PDF", action='store_true', default=False)
 
@@ -370,13 +373,6 @@ def main():
         args.recalc_PDF = True
         args.plot_PDF = True
 
-#    args = sys.argv
-    if len(sys.argv) > 1:
-        if sys.argv[1] == 'recalc':
-            recalc = True
-    else:
-        recalc = False
-
     config = readConfig('config.json')
 
 # Create output directories if they don't exist
@@ -384,7 +380,7 @@ def main():
     outpdfdir = workdir+'/IndividualPDFs'
     outpercdir = workdir+'/Percentiles' # to do: supply as arg to checkAboveLNM, write percentile files to this dir
     outpbndir = workdir+'/PctBelowNLNM'
-    for outdir in [outpdfdir, outpercdir, outpbndir]:
+    for outdir in [workdir, outpdfdir, outpercdir, outpbndir]:
         if not os.path.exists(outdir):
             os.mkdir(outdir)
             print('created', outdir)
@@ -392,37 +388,16 @@ def main():
             print('exists', outdir)
 
 
-    outname = 'irisfedcat_initial.txt'
     if args.request_stns:
+        outname = 'irisfedcat_initial.txt'
         df = getIRISfedcat(config, outname)
     else:
         df = readIRISfedcat(args.read_stns)
 
-# not sure how to work in resume check of LNM, comment out for now    
-#    resume_lnm_check = False
-#    if resume_lnm_check:
-#    # find last target+start/end time that we checked
-#        df_checked_already = pd.read_csv('used.txt', names=['Target', 'StartTime', 'EndTime'], sep=' ')
-#        lastnscl = df_checked_already.iloc[-1].Target
-#        laststart = df_checked_already.iloc[-1].StartTime
-#        lastend = df_checked_already.iloc[-1].EndTime
-#        i_restart = df[(df.Target == lastnscl) & (df.StartTime == laststart) & (df.EndTime == lastend)].index[0]
-#        print('restarting from', i_restart)
-#        df_restart = df.loc[i_restart:]
-#        df_selected = checkAboveLNM(df_restart, config)
-#        df_selected = df[:i_restart-1].append(df_selected)
-#    else:
-#        df_selected = checkAboveLNM(df, config)
     if args.lnm_check:
-        df_selected = checkAboveLNM(df, config)
+        df_selected = checkAboveLNM(df, config, args)
     else:
         df_selected = df.copy()
-
-    
-# or if we've already run checkAboveLNM to produce a 'selected' file (or we've made it some other way): 
-    #df_selected = pd.read_csv('irisfedcat_selected.txt', sep='|')
-    #df_selected = pd.read_csv('irisfedcat_selected_gt200.txt', sep='|')
-    #df_selected = readIRISfedcat('irisfedcat_selected_gt250.txt')
 
     if args.get_PDFs:
         requestPDFs(df_selected, outpdfdir)
