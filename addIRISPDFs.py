@@ -10,6 +10,8 @@ import requests
 import pandas as pd
 from io import StringIO
 
+import json
+
 from noiseplot import setupPSDPlot
 from obspy.imaging.cm import pqlx
 from obspy import UTCDateTime
@@ -18,15 +20,38 @@ import matplotlib.pyplot as plt
 ####
 # To do:
 # Read from config or supply as command line arg:
-#     - make working directory an argument or read from config
-#     - make list of nets/stns
+#     - make list and map of nets/stns?
+####################################
+def readConfig(jsonfile):
+    '''Parse JSON configuration file, which should contain:
+       - workdir (can be '.' or path to a directory that MUST ALREADY EXIST)
+       Several wildcard-able text strings that will be plugged directly into irisws fedcat URL:
+       - networks
+       - stations
+       - locations
+       - channels
+       And a few other values for selecting data:
+       - min_samp_rate : 
+       - daily_perc_cutoff : goes into pct_below_nlnm request as value_gt parameter 
+       - life_perc_cutoff : reject station if this % of days fall below NLNM
+    '''
+    fh = open(jsonfile)
+    raw = fh.read()
+    try: 
+        config = json.loads(raw)
+        return config
+    except:
+        print("Error in JSON config file, please check formatting")
+        sys.exit()
+####################################
 
 ####################################
 def readIRISfedcat(fedcatfile):
 # read file returned by fedcat, clean up headers, add columns holding start/end y-m-d for MUSTANG requests
 # specify dtypes explicitly so we know what we're working with later
-# note that we have to give column names including spaces etc. exactly as they're specified in IRIS fedcat request
-# before we clean them up using df.rename
+# note that we have to give column names including spaces etc. 
+# to match format returned by IRIS fedcat request!
+# Then we clean them up using df.rename
     use_dtypes = {'#Network' : 'str',
                   ' Station ' : 'str',
                   ' Location ' : 'str',
@@ -53,11 +78,9 @@ def readIRISfedcat(fedcatfile):
         df = df.drop(0).reset_index(drop=True)
 
 # Replace NaN Locations with a blank character
-#    print(df.Location)
     df = df.replace(pd.np.nan, '')
 
 # Make a new column w/NSCLQ target for MUSTANG
-    #df['Target'] = stns.Network+'.'+stns.Station+'.'+stns.Location+'.'+stns.Channel + '.M'
     df['Target'] = df[['Network', 'Station', 'Location', 'Channel']].apply(lambda row: '.'.join(row.values.astype(str))+'.M', axis=1)
 
 # Add columns holding start/end y-m-d for use with MUSTANG requests
@@ -87,14 +110,15 @@ def readIRISfedcat(fedcatfile):
 ####################################
 
 ####################################
-def getIRISfedcat(outname):
+def getIRISfedcat(config, outname):
 # use requests to get fedcat file...
 # in bash: used
 # curl "http://service.iris.edu/irisws/fedcatalog/1/query?net=*&cha=HHZ,CHZ,DHZ,EHZ&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC" > irisfedcat.txt
 # set NSLC target(s) and start/end dates in config file?
     #reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net=*&cha=*HZ&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'
-#    reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net=II,IU,CU,IC,US&cha=*HZ&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'
-    reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net=GS&cha=*HZ&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'
+    #reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net=II,IU,CU,IC,US&cha=*HZ&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'
+    #reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net=GS&cha=*HZ&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'
+    reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net={0}&sta={1}&loc={2}&cha={3}&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'.format(config['networks'],config['stations'], config['locations'], config['channels'])
     print('requesting list of stations')
     res = requests.get(reqstring)
     outfile = open(outname, 'w')
@@ -104,17 +128,19 @@ def getIRISfedcat(outname):
 # parse returned text just like we'd read a CSV
     df = readIRISfedcat(StringIO(res.text))
 
-# get only sample rates >= 200 sps, remember to reset indices!!
+# get only sample rates >= min_samp_rate, remember to reset indices!!
 # to do: set sample rate in config file?
 # to do: change this so we can specify 'selected' text file name!
-    df = df[df.SampleRate >= 100].reset_index(drop=True)
-    df.to_csv('irisfedcat_GS_allHZ_ge100.txt', sep='|', index=False)
+    df = df[df.SampleRate >= config['min_samp_rate']].reset_index(drop=True)
+    savecsv = 'irisfedcat_samprate_ge{0:d}.txt'.format(config['min_samp_rate'])
+    df.to_csv(savecsv, sep='|', index=False)
     return df
 ####################################    
 
 ####################################
 # TO DO: catch errors in requesting data and find a way to gracefully restart after errors instead of re-requesting everything
-def checkAboveLNM(df, getplots=False, outpbndir='PctBelowNLNM'): 
+# to do: read config for daily % cutoff and lifetime % cutoff
+def checkAboveLNM(df, config, getplots=False, outpbndir='PctBelowNLNM'): 
     '''For each Target and Start/EndTime in the dataframe,
        request pct_below_nlnm metric from IRIS MUSTANG
        and check that the # of days below a given percentange do not exceed
@@ -126,12 +152,11 @@ def checkAboveLNM(df, getplots=False, outpbndir='PctBelowNLNM'):
     useindex = []
     notusedfile = open('notused.txt', 'w')
     usedfile = open('used.txt', 'w')
-    value_gt = 5.0
     for i in df.index: 
-        outpbnname = outpbndir+'/{0}_{1}_{2}.txt'.format(df.Target[i],value_gt,df.StartDate[i],df.EndDate[i])
+        outpbnname = outpbndir+'/{0}_{1}_{2}.txt'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
         if not os.path.exists(outpbnname):
             reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
-            reqstring = reqbase+'&target={0}&value_gt={1}&start={2}&end={3}'.format(df.Target[i],value_gt,df.StartDate[i],df.EndDate[i])
+            reqstring = reqbase+'&target={0}&value_gt={1}&start={2}&end={3}'.format(df.Target[i],config['daily_perc_cutoff'],df.StartDate[i],df.EndDate[i])
             res = requests.get(reqstring)
             print(reqstring)
             outpbnfile = open(outpbnname, 'w')
@@ -139,7 +164,7 @@ def checkAboveLNM(df, getplots=False, outpbndir='PctBelowNLNM'):
             outpbnfile.close()
             text = res.text.split('\n')[2:-1]
         else:
-            print('pct_below_nlnm already checked for {0}, will not re-request'.format(df.Target[i]))
+            print('already requested pct_below_nlnm for {0}, will not re-request'.format(df.Target[i]))
             text = open(outpbnname, 'r').readlines()
             text = [ line.strip('\n') for line in text ][2:-1]
 
@@ -179,13 +204,16 @@ def checkAboveLNM(df, getplots=False, outpbndir='PctBelowNLNM'):
             lifetime_pct_below = (total_below_time/df.TotalTime[i])*100.
         else: 
             lifetime_pct_below = 0.
-        if lifetime_pct_below <= 5:
+        if lifetime_pct_below <= config['life_perc_cutoff']:
             usedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
             useindex.append(i)
+            termcolor=32
         else:
             notusedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartTime[i], df.EndTime[i]))
+            termcolor=31
 
-        print(df.Target[i], '% days in lifetime >{0}% below LNM:'.format(value_gt), lifetime_pct_below)
+#        print(df.Target[i], '% days in lifetime >{0}% below LNM:'.format(value_gt), lifetime_pct_below)
+        print('\033[1;{3};40m {0}: % days in lifetime >{1}% below LNM: {2:.2f}\033[0;37;40m '.format(df.Target[i], config['daily_perc_cutoff'], lifetime_pct_below, termcolor))
 
     usedfile.close()
     notusedfile.close()
@@ -202,6 +230,7 @@ def requestPDFs(df, outpdfdir):
 #    outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
     for i in df.index: #range(len(df.Target)):
         print(i, df.Target[i])
+        #outname = outpdfdir+'/{0}_{1}_{2}_gt_{3}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
         outname = outpdfdir+'/{0}_{1}_{2}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
         if not os.path.exists(outname):
             print('requesting PDF PSD for:', df.Target[i])
@@ -307,17 +336,23 @@ def main():
     else:
         recalc = False
 
+    config = readConfig('config.json')
+
 # Create output directories if they don't exist
 #    workdir = '/Users/ewolin/research/NewNewNoise/PermWithPython/' # to do : read this from config and/or default to '.'
-    workdir = '/Users/ewolin/research/NewNewNoise/GSwithPython/' # to do : read this from config and/or default to '.'
+#    workdir = '/Users/ewolin/research/NewNewNoise/GSwithPython/' # to do : read this from config and/or default to '.'
 #    workdir = '.'
-    config = '' # to do: figure out best format to use and how to parse
+
+    workdir = config['workdir']
     outpdfdir = workdir+'/IndividualPDFs'
     outpercdir = workdir+'/Percentiles' # to do: supply as arg to checkAboveLNM, write percentile files to this dir
-    outpbndir = workdir+'PctBelowNLNM'
+    outpbndir = workdir+'/PctBelowNLNM'
     for outdir in [outpdfdir, outpercdir, outpbndir]:
         if not os.path.exists(outdir):
             os.mkdir(outdir)
+            print('created', outdir)
+        else:
+            print('exists', outdir)
 
 
 # Read text file returned from IRIS' fedcat service to build list of channel on/off dates
@@ -326,8 +361,9 @@ def main():
     #infile = '/Users/ewolin/research/NewNewNoise/Get200/TMP/irisfedcat_allHZ_ge200.txt'
     #df = readIRISfedcat(infile)
     #print(df.Target[0])
+
     outname = 'irisfedcat_initial.txt'
-    df = getIRISfedcat(outname)
+    df = getIRISfedcat(config, outname)
 
     
     # write out list of all channels used...
@@ -344,10 +380,10 @@ def main():
         i_restart = df[(df.Target == lastnscl) & (df.StartTime == laststart) & (df.EndTime == lastend)].index[0]
         print('restarting from', i_restart)
         df_restart = df.loc[i_restart:]
-        df_selected = checkAboveLNM(df_restart)
+        df_selected = checkAboveLNM(df_restart, config)
         df_selected = df[:i_restart-1].append(df_selected)
     else:
-        df_selected = checkAboveLNM(df)
+        df_selected = checkAboveLNM(df, config)
         
 
     
@@ -395,6 +431,8 @@ def main():
     y = -137 + ddb/dlogperiod * (np.log10(0.01)-np.log10(0.73))
     #print(y)
     #ax.plot(1, y, 'ko')
+
+    ax.plot([0.01, 0.1], [-91, -91], 'r--', label='GS high noise model')
     
     ax.grid()
     

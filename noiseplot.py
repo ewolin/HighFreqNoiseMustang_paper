@@ -13,7 +13,7 @@ def setupPSDPlot():
     ax.semilogx()
     ax.set_xlim(0.05, 200)
     ax.set_xlabel('Period (s)')
-    ax.set_ylabel('Power (dB[Hz])')
+    ax.set_ylabel(r'Power (dB[m^2/s^4/Hz])')
     ax.set_ylim(-200, -50)
     return fig, ax
 
