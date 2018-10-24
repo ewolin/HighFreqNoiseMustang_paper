@@ -13,6 +13,7 @@ from io import StringIO
 import json
 import argparse
 
+import functools
 
 from noiseplot import setupPSDPlot
 from scipy import stats
@@ -245,14 +246,12 @@ def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'):
 
 ####################################
 def requestPDFs(df, outpdfdir):
-# request PDF PSDs from MUSTANG
-# but first check to see if PDF file of date/time range of interest already exists in outpdfdir
-#    outpdfdir = '/Users/ewolin/research/NewNewNoise/Get200/TMP'
+    '''Request PDF PSDs from MUSTANG
+       but first, check to see if PDF file for stn epoch already exists in outpdfdir
+       If so, don't re-request unless forced'''
     df_successful = df.copy()
     errorfile = open(outpdfdir+'/error.log', 'w')
-    for i in df.index: #range(len(df.Target)):
-        #print(i, df.Target[i])
-        #outname = outpdfdir+'/{0}_{1}_{2}_gt_{3}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
+    for i in df.index: 
         outname = outpdfdir+'/{0}_{1}_{2}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
         if not os.path.exists(outname):
             print('requesting PDF PSD for:', df.Target[i])
@@ -277,10 +276,9 @@ def requestPDFs(df, outpdfdir):
     return df_successful
 ####################################
 
-
 ####################################
 def listPDFFiles(df, outpdfdir):
-    '''Make a list of all the PDF PSD files to read based on contents of dataframe '''
+    '''Make a list of all the PDF PSD files to read based on contents of a dataframe '''
     pdffiles = []
     for i in df.index:
         pdffile = outpdfdir+'/'+df.Target[i]+'_'+df.StartDate[i]+'_'+df.EndDate[i]+'.txt'
@@ -296,15 +294,18 @@ def findPDFBounds(pdffiles):
     freq_u = df_single.freq.unique()
     db_u = df_single.db.unique()
     for i in range(1,len(pdffiles)):
-        #print(i, pdffiles[i])
         df_single =  pd.read_csv(pdffiles[i], skiprows=5, names=['freq', 'db', 'hits'])
         freq_u = np.unique(np.append(freq_u, df_single.freq.unique()))
         db_u = np.unique(np.append(db_u, df_single.db.unique()))
+    np.save('freq_u.npy', freq_u)
+    np.save('db_u.npy', db_u)
     return freq_u, db_u
 ####################################
     
 ####################################
 def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
+    '''Add together all PDF PSDs in pdffiles!
+       And save as .npy file for easier reading later'''
     # Set up dictionaries to convert freq and db to integers
     freq_s = [str(f) for f in freq_u ]
     i_f = np.arange(len(freq_u))
@@ -345,7 +346,8 @@ def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
 
 ####################################
 def find_percentile(freq_u, db_u, newpdf_norm, perc, ax):
-#    db_perc = -999*np.ones(len(freq_u))
+    '''Given a (normalized) PDF, find the dB levels of a given percentile'''
+# surely there must be something in numpy or scipy that does this but I haven't hunted it down yet.
     nfreq = len(freq_u)
     db_perc = -999*np.ones(nfreq) 
     for i in range(nfreq):
@@ -359,6 +361,38 @@ def find_percentile(freq_u, db_u, newpdf_norm, perc, ax):
     ax.plot(1./freq_u, db_perc, label='{0:.1f}%'.format(100*perc))
     return db_perc
 ####################################
+
+####################################
+def linregressHighFreqs(f, db, fnyqs, ax, f_min=3, f_max=100):
+    '''Fit a line to a given PDF percentile between f_max and f_min.
+       Ignore frequencies from 0.75*fnyq and fnyq to cut out spikes'''
+    iclip, = np.where((f >= f_min) & (f <= f_max))
+    print(iclip)
+    i_use = iclip
+    for i in range(len(fnyqs)):
+        i_nonyq, = np.where((f>fnyqs[i]) | (f<0.75*fnyqs[i]))
+        print(i_nonyq)
+        print(fnyqs[i],np.intersect1d(i_use, i_nonyq))
+        i_use = np.intersect1d(i_use, i_nonyq)
+    x = f[i_use]
+    y = db[i_use]
+    for i in range(len(x)):
+        print(x[i], y[i])
+    # convert to period and take log10 so we can do a linear fit and then easily plot with setupPSDPlot
+    plt.plot(1./x, y, 'ko')
+    x_log = np.log10(1./x)
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x_log,y)
+    y_new = x_log*slope+intercept
+    ax.plot(1./x, y_new, lw=5, color='blue')
+
+# extend a bit to plot between 0.001-0.1 s (10-100 Hz)
+    T_extend = np.logspace(-2,np.log10(0.731139))
+    y_extend = np.log10(T_extend)*slope+intercept
+    ax.plot(T_extend, y_extend, lw=3, color='orange')
+    
+    return x, y_new
+####################################
+
 
 ####################################
 # ^.v.^
@@ -419,19 +453,21 @@ def main():
     pdffiles = listPDFFiles(df_selected, outpdfdir)
 
 # Find min/max freqs and dBs and sum PDFs    
-    freq_u, db_u = findPDFBounds(pdffiles)
     if args.calc_PDF:
+        freq_u, db_u = findPDFBounds(pdffiles)
         pdf = calcMegaPDF(freq_u, db_u, pdffiles)
     else:
+        freq_u = np.load('freq_u.npy')
+        db_u = np.load('db_u.npy')
         pdf = np.load('megapdf.npy')
 
-    if args.plot_PDF:
 # Plot PDF
+    if args.plot_PDF:
         cmap = pqlx
         fig, ax = setupPSDPlot()
     
+# Normalize PDF since MUSTANG returns hit counts not %
         newpdf_norm = np.zeros(shape=pdf.shape, dtype=np.float_)
-# normalize PDF since MUSTANG returns hit counts not %
         for i in range(len(freq_u)):
             if np.sum(pdf[i,:]) > 0:
                 newpdf_norm[i,:] = pdf[i,:]/np.sum(pdf[i,:])
@@ -455,24 +491,15 @@ def main():
         ax.grid()
     
         find_percentile(freq_u, db_u, newpdf_norm, 0.01, ax)
-        y_full = find_percentile(freq_u, db_u, newpdf_norm, 0.02, ax)
-        iwhere, = np.where((freq_u >= 3)&(freq_u<=40))
-        x = freq_u[iwhere]
-        y = y_full[iwhere]
+        db_2pct = find_percentile(freq_u, db_u, newpdf_norm, 0.02, ax)
         find_percentile(freq_u, db_u, newpdf_norm, 0.1, ax)
         find_percentile(freq_u, db_u, newpdf_norm, 0.5, ax)
-        find_percentile(freq_u, db_u, newpdf_norm, 0.9, ax)
-        #find_percentile(newpdf_norm, 1.0)
+        db_90pct = find_percentile(freq_u, db_u, newpdf_norm, 0.9, ax)
 
-# need to get db, log(f or T) out of percentiles and do a linear fit
-        print(x)
-        x_log = np.log10(1./x)
-        slope, intercept, r_value, p_value, std_err = stats.linregress(x_log,y)
-        y_new = x_log*slope+intercept
-        plt.plot(1./x, y_new, lw=5, color='blue')
-        print(min(1./x), max(1./x), min(y), max(y))
-        plt.plot(1./x, np.ones(len(x))*-180, lw=10, color='purple')
-    
+        fnyqs = 0.5*df.SampleRate.unique()
+        linregressHighFreqs(freq_u, db_2pct, fnyqs, ax, f_min=10, f_max=100)
+        linregressHighFreqs(freq_u, db_90pct, fnyqs, ax, f_min=10, f_max=90)
+
         ax.legend(ncol=3, loc='lower center', fontsize='small')
         ax.set_xlim(0.005,10)
         #ax.set_xlim(0.01,10)
