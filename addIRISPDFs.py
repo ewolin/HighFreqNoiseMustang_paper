@@ -4,7 +4,7 @@
 import sys
 import os
 import numpy as np
-from glob import glob
+#from glob import glob
 import requests
 
 import pandas as pd
@@ -37,10 +37,26 @@ def readConfig(jsonfile):
        - stations
        - locations
        - channels
-       And a few other values for selecting data:
+       A few other values for selecting data:
        - min_samp_rate : 
        - daily_perc_cutoff : goes into pct_below_nlnm request as value_gt parameter 
        - life_perc_cutoff : reject station if this % of days fall below NLNM
+       Can also contain parameters for calculating, plotting, and fitting percentiles to PDF:
+       - plot_percs: list of percentiles you want to plot. ex: "plot_percs" : [1, 2, 50, 90]
+       - fit_percs: list of percentiles to fit from fmin to fmax.  Specify like so:
+       	"fit_percs" : { "perc2": 
+                {
+		"perc" : 2.0,
+		"fmin" : 10,
+		"fmax" : 50
+		},
+	        	"perc1": 
+                { 
+		"perc" : 1.0,
+		"fmin" : 10,
+		"fmax" : 50
+		}
+                     }
     '''
     fh = open(jsonfile)
     raw = fh.read()
@@ -319,33 +335,41 @@ def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
     for infile in pdffiles:
         print('adding to PDF:',infile.split('/')[-1])
     # Read input file
-        try:
-            freq = np.loadtxt(infile, unpack=True, delimiter=',', usecols=0)
-            db, hits = np.loadtxt(infile, unpack=True, delimiter=',', usecols=[1,2], dtype=np.int_)
-                
-            for i in range(len(hits)):
-                f1 = freq[i]
-                db1 = db[i]
-                hit1 = hits[i]
+        #try:
+        freq = np.loadtxt(infile, unpack=True, delimiter=',', usecols=0)
+        db, hits = np.loadtxt(infile, unpack=True, delimiter=',', usecols=[1,2], dtype=np.int_)
             
-                i_f1 = fd[str(f1)]
-                i_db1 = dbd[db1]
-                pdf[i_f1, i_db1] += hit1
+        for i in range(len(hits)):
+            #print(freq[i], db[i], hits[i])
+            f1 = freq[i]
+            db1 = db[i]
+            hit1 = hits[i]
+        
+            i_f1 = fd[str(f1)]
+            i_db1 = dbd[db1]
+            pdf[i_f1, i_db1] += hit1
+        #except:
+            #print('trouble adding {0} to pdf'.format(infile))
 # tried using pandas to add PDF files but I think it's faster w/loadtxt (the way I did it originally)
 #            df_pdf = pd.read_csv(infile, skiprows=5, names=['freq', 'db', 'hits'], dtype={'freq':'str', 'db':'int', 'hits':'int'})
 #            for i in df_pdf.index:
 #                i_f1 = fd[df_pdf.freq[i]]
 #                i_db1 = dbd[df_pdf.db[i]]
 #                pdf[i_f1, i_db1] += df_pdf.hits[i]
-        except:
-            pass
     # Save PDF to a numpy file so we can plot it easily later
     np.save(outpdffile, pdf)
+    outpdftext = open('megapdf.txt', 'w')
+    outpdftext.write('#freq db hits\n')
+    for i_f in range(len(freq_u)):
+        for i_db in range(len(db_u)):
+            outpdftext.write('{0} {1} {2}\n'.format(freq_u[i_f], db_u[i_db], pdf[i_f, i_db]))
+    outpdftext.close()
+            
     return pdf
 ####################################
 
 ####################################
-def find_percentile(freq_u, db_u, newpdf_norm, perc, ax):
+def find_percentile(freq_u, db_u, newpdf_norm, perc, ax, plotline=True):
     '''Given a (normalized) PDF, find the dB levels of a given percentile'''
 # surely there must be something in numpy or scipy that does this but I haven't hunted it down yet.
     nfreq = len(freq_u)
@@ -358,7 +382,15 @@ def find_percentile(freq_u, db_u, newpdf_norm, perc, ax):
             if(dum >= perc):
                 db_perc[i] = db_u[j]
                 break
-    ax.plot(1./freq_u, db_perc, label='{0:.1f}%'.format(100*perc))
+    if plotline:
+        ax.plot(1./freq_u, db_perc, label='{0:.1f}%'.format(100*perc))
+    outname = 'Percentiles/percentile_{0:.1f}.txt'.format(100*perc)
+    outfile = open(outname,'w')
+    outfile.write('#freq dB\n')
+    for i in range(len(db_perc)):
+        outfile.write('{0} {1}\n'.format(freq_u[i], db_perc[i]))
+    outfile.close()
+    print('Wrote {0} percentile to {1}'.format(100*perc, outname))
     return db_perc
 ####################################
 
@@ -379,7 +411,7 @@ def linregressHighFreqs(f, db, fnyqs, ax, f_min=3, f_max=100):
     for i in range(len(x)):
         print(x[i], y[i])
     # convert to period and take log10 so we can do a linear fit and then easily plot with setupPSDPlot
-    plt.plot(1./x, y, 'ko')
+    ax.plot(1./x, y, 'ko')
     x_log = np.log10(1./x)
     slope, intercept, r_value, p_value, std_err = stats.linregress(x_log,y)
     y_new = x_log*slope+intercept
@@ -477,9 +509,9 @@ def main():
         im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T, cmap=cmap, vmax=.30)
     
 # Plot PDF and save    
-        ax.plot([0.01, 0.3], [-137, -162], 'k--', label='200 sps noise model')
-        ax.plot([0.01, 0.731139], [-137,-168.536389686], 'c:', lw=5, label='200 sps noise model')
-        ax.plot([0.01, 1], [-137,-170.849624626], 'y:', lw=2, label='200 sps noise model')
+        #ax.plot([0.01, 0.3], [-137, -162], 'k--', label='200 sps noise model')
+        ax.plot([0.01, 0.731139], [-137,-168.536389686], 'c:', lw=3, label='200 sps noise model')
+        #ax.plot([0.01, 1], [-137,-170.849624626], 'y:', lw=2, label='200 sps noise model')
         dlogperiod = np.log10(0.3) - np.log10(0.01)
         ddb = -137 - -162
         y = -137 + ddb/dlogperiod * (np.log10(0.01)-np.log10(0.73))
@@ -489,20 +521,33 @@ def main():
         ax.plot([0.01, 0.1], [-91, -91], 'r--', label='GS high noise model?')
     
         ax.grid()
-    
-        find_percentile(freq_u, db_u, newpdf_norm, 0.01, ax)
-        db_2pct = find_percentile(freq_u, db_u, newpdf_norm, 0.02, ax)
-        find_percentile(freq_u, db_u, newpdf_norm, 0.1, ax)
-        find_percentile(freq_u, db_u, newpdf_norm, 0.5, ax)
-        db_90pct = find_percentile(freq_u, db_u, newpdf_norm, 0.9, ax)
 
         fnyqs = 0.5*df.SampleRate.unique()
-        linregressHighFreqs(freq_u, db_2pct, fnyqs, ax, f_min=10, f_max=100)
-        linregressHighFreqs(freq_u, db_90pct, fnyqs, ax, f_min=10, f_max=90)
+
+# Plot specified percentiles
+        try:
+            for perc in config['plot_percs']:
+                frac = perc/100.
+                db_perc = find_percentile(freq_u, db_u, newpdf_norm, frac, ax, plotline=True)
+        except KeyError:
+            print('no plot percentiles specified in config.json')
+            print('ex: "plot_percs" : [1, 2, 50, 90]')
+
+# Fit a line to specified percentiles and plot
+        try:
+            for perc in config['fit_percs']:
+                frac = config['fit_percs'][perc]['perc']/100.
+                f_min = config['fit_percs'][perc]['fmin']
+                f_max = config['fit_percs'][perc]['fmax']
+                db_perc = find_percentile(freq_u, db_u, newpdf_norm, frac, ax, plotline=False)
+                linregressHighFreqs(freq_u, db_perc, fnyqs, ax, f_min=f_min, f_max=f_max)
+        except KeyError:
+            print('no fit percentiles specified in config.json')
 
         ax.legend(ncol=3, loc='lower center', fontsize='small')
         ax.set_xlim(0.005,10)
         #ax.set_xlim(0.01,10)
+
         fig.savefig('meh.png')
 
 if __name__ == "__main__":
