@@ -7,17 +7,42 @@ def setupPSDPlot():
        x axis = period (s)
        y axis = decibels '''
     codedir = '/Users/ewolin/code/HighFreqNoiseMustang'
+    choosedir = '/Users/ewolin/research/NewNewNoise/ChosenNoise'
     nhnm = np.loadtxt(codedir+'/peterson_HNM.mod', unpack=True)
     nlnm = np.loadtxt(codedir+'/peterson_LNM.mod', unpack=True)
+    nhnb = np.loadtxt(choosedir+'/GS_90_T-vs-DB.txt', unpack=True)
+    nlportb = np.loadtxt(choosedir+'/Gt200_1_T-vs-dB.txt', unpack=True)
+    nlpermb = np.loadtxt(choosedir+'/Perm_1_T-vs-dB.txt', unpack=True)
 
-    fig, ax = plt.subplots(figsize=(6.5,6)) 
+    #fig, ax = plt.subplots(figsize=(6.5,6)) 
+    fig, ax = plt.subplots(figsize=(8,6)) 
     ax.plot(nhnm[0], nhnm[1], linewidth=2, color='black')
     ax.plot(nlnm[0], nlnm[1], linewidth=2, color='black')
+    #ax.plot(nhnb[0], nhnb[1], linewidth=2, ls=':', color='black')
+    ax.plot(nlportb[0], nlportb[1], linewidth=2, ls='--', color='pink')
+    #ax.plot(nlpermb[0], nlpermb[1], linewidth=2, ls='-', color='black')
     ax.semilogx()
     ax.set_xlim(0.05, 200)
     ax.set_xlabel('Period (s)')
     ax.set_ylabel(r'Power (dB[m$^2$/s$^4$/Hz])')
     ax.set_ylim(-200, -50)
+
+# experimental...piecewise linear fit to baselines
+# low perm:
+#    ax.plot([0.02,0.110485],[-160,-160], color='grey', ls='-.', lw=2)
+#    ax.plot([0.110485,0.340784],[-160,-166.7], color='grey', ls='-.', lw=2)
+    ax.plot([0.02,0.110485,0.340784], [-160, -160, -166.7], color='grey', ls='-.', lw=2)
+# high:
+    #ax.plot([0.1, 0.01], [-91.5, -91.5], color='grey', ls=':', lw=2)
+ #   ax.plot([0.01, 0.03], [-90, -90], color='grey', ls=':', lw=2)
+ #   ax.plot([0.03, 0.04], [-90, -88], color='grey', ls=':', lw=2)
+ #   ax.plot([0.04, 0.065], [-88, -88], color='grey', ls=':', lw=2)
+#    ax.plot([0.065, 0.1], [-88, -91.5], color='grey', ls=':', lw=2)
+
+    ax.plot([0.01, 0.03, 0.04, 0.065, 0.1], [-90, -90, -88, -88, -91.5], color='grey', ls=':', lw=2)
+
+    ax.plot([0.01, 0.110485, 0.340784], [-137.267, -160, -166.7], color='red', ls='-', lw=1)
+
     return fig, ax
 
 

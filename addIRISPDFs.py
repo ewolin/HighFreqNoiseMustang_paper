@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-# NOTE: run getlistoffreqs.sh to make freqlist_uniq.txt and dblist_uniq.txt first!
+# pretty sure this will cover all dependencies:
+# conda create -n hfnoise python numpy requests pandas scipy obspy matplotlib
+# (make sure you are subscribed to conda-forge channel first)
 
 import sys
 import os
@@ -260,6 +262,7 @@ def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'):
     return df_selected
 ####################################
 
+
 ####################################
 def requestPDFs(df, outpdfdir):
     '''Request PDF PSDs from MUSTANG
@@ -304,8 +307,10 @@ def listPDFFiles(df, outpdfdir):
 
 ####################################
 def findPDFBounds(pdffiles):
+# need to find a way to write out unique frequency STRINGS as well for lookup in calcMegaPDF
     '''Get lists of unique frequencies and dBs
        from all individual PDF files'''
+    print('finding list of unique freq, dB')
     df_single = pd.read_csv(pdffiles[0], skiprows=5, names=['freq', 'db', 'hits'])
     freq_u = df_single.freq.unique()
     db_u = df_single.db.unique()
@@ -317,15 +322,32 @@ def findPDFBounds(pdffiles):
     np.save('db_u.npy', db_u)
     return freq_u, db_u
 ####################################
-    
+
 ####################################
-def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
+def findUniqFreq(pdffiles):
+    '''Find unique frequency values as *strings* for quick lookup in calcMegaPDF''' 
+    df_single = pd.read_csv(pdffiles[0], skiprows=5, names=['freq', 'db', 'hits'], dtype={'freq':'str'})
+    freq_u = df_single.freq.unique()
+    for i in range(1,len(pdffiles)):
+        df_single =  pd.read_csv(pdffiles[i], skiprows=5, names=['freq', 'db', 'hits'], dtype={'freq':'str'})
+        freq_u = np.unique(np.append(freq_u, df_single.freq.unique()))
+    outfile = open('freq_u_str.txt', 'w')
+    for i in range(len(freq_u)):
+        outfile.write('{0}\n'.format(freq_u[i]))
+    outfile.close()
+    isort = np.argsort(freq_u.astype('float'))
+#    freq_u.sort()
+    freq_u = freq_u[isort]
+    np.save('freq_u_str.npy', freq_u)
+    return freq_u
+####################################
+def calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles, outpdffile='megapdf.npy'):
     '''Add together all PDF PSDs in pdffiles!
        And save as .npy file for easier reading later'''
     # Set up dictionaries to convert freq and db to integers
-    freq_s = [str(f) for f in freq_u ]
-    i_f = np.arange(len(freq_u))
-    fd = dict(zip(freq_s, i_f))
+    i_f = np.arange(len(freq_u_str))
+    fd = dict(zip(freq_u_str, i_f))
+    print(fd)
 
     i_db = np.arange(len(db_u))
     dbd = dict(zip(db_u, i_db))
@@ -351,11 +373,11 @@ def calcMegaPDF(freq_u, db_u, pdffiles, outpdffile='megapdf.npy'):
         #except:
             #print('trouble adding {0} to pdf'.format(infile))
 # tried using pandas to add PDF files but I think it's faster w/loadtxt (the way I did it originally)
-#            df_pdf = pd.read_csv(infile, skiprows=5, names=['freq', 'db', 'hits'], dtype={'freq':'str', 'db':'int', 'hits':'int'})
-#            for i in df_pdf.index:
-#                i_f1 = fd[df_pdf.freq[i]]
-#                i_db1 = dbd[df_pdf.db[i]]
-#                pdf[i_f1, i_db1] += df_pdf.hits[i]
+#        df_pdf = pd.read_csv(infile, skiprows=5, names=['freq', 'db', 'hits'], dtype={'freq':'str', 'db':'int', 'hits':'int'})
+#        for i in df_pdf.index:
+#            i_f1 = fd[df_pdf.freq[i]]
+#            i_db1 = dbd[df_pdf.db[i]]
+#            pdf[i_f1, i_db1] += df_pdf.hits[i]
     # Save PDF to a numpy file so we can plot it easily later
     np.save(outpdffile, pdf)
     outpdftext = open('megapdf.txt', 'w')
@@ -411,18 +433,19 @@ def linregressHighFreqs(f, db, fnyqs, ax, f_min=3, f_max=100):
     for i in range(len(x)):
         print(x[i], y[i])
     # convert to period and take log10 so we can do a linear fit and then easily plot with setupPSDPlot
-    ax.plot(1./x, y, 'ko')
+    #ax.plot(1./x, y, 'ko')
     x_log = np.log10(1./x)
     slope, intercept, r_value, p_value, std_err = stats.linregress(x_log,y)
     y_new = x_log*slope+intercept
-    ax.plot(1./x, y_new, lw=5, color='blue')
+    #ax.plot(1./x, y_new, lw=5, color='blue')
 
 # extend a bit to plot between 0.001-0.1 s (10-100 Hz)
     T_extend = np.logspace(-2,np.log10(0.731139))
     y_extend = np.log10(T_extend)*slope+intercept
-    ax.plot(T_extend, y_extend, lw=3, color='orange')
+ #   ax.plot(T_extend, y_extend, lw=3)#, color='orange')
     
-    return x, y_new
+#    return x, y_new
+    return slope, intercept
 ####################################
 
 
@@ -487,15 +510,20 @@ def main():
 # Find min/max freqs and dBs and sum PDFs    
     if args.calc_PDF:
         freq_u, db_u = findPDFBounds(pdffiles)
-        pdf = calcMegaPDF(freq_u, db_u, pdffiles)
-    else:
+        freq_u_str = findUniqFreq(pdffiles)
+        pdf = calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles)
+    elif args.plot_PDF:
         freq_u = np.load('freq_u.npy')
+        freq_u_str = np.load('freq_u_str.npy')
         db_u = np.load('db_u.npy')
         pdf = np.load('megapdf.npy')
 
 # Plot PDF
     if args.plot_PDF:
-        cmap = pqlx
+#        cmap = pqlx
+#        vmax=0.30
+        cmap = 'bone_r'
+        vmax=0.05
         fig, ax = setupPSDPlot()
     
 # Normalize PDF since MUSTANG returns hit counts not %
@@ -506,21 +534,25 @@ def main():
             else:
                 newpdf_norm[i,:] = pdf[i,:]*1e-10 # np.nan*pdf[i,:]
     
-        im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T, cmap=cmap, vmax=.30)
+        im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T*100, cmap=cmap, vmax=vmax*100)
+        fig.colorbar(im, ax=ax, label='Probability (%)')
     
 # Plot PDF and save    
+# vertical dashed line at 100 Hz
+        ax.plot([0.01, 0.01], [-200, -50], ls='--', color='grey')
         #ax.plot([0.01, 0.3], [-137, -162], 'k--', label='200 sps noise model')
-        ax.plot([0.01, 0.731139], [-137,-168.536389686], 'c:', lw=3, label='200 sps noise model')
+        #ax.plot([0.01, 0.731139], [-137,-168.536389686], 'c:', lw=3, label='200 sps noise model')
         #ax.plot([0.01, 1], [-137,-170.849624626], 'y:', lw=2, label='200 sps noise model')
         dlogperiod = np.log10(0.3) - np.log10(0.01)
         ddb = -137 - -162
         y = -137 + ddb/dlogperiod * (np.log10(0.01)-np.log10(0.73))
         #print(y)
         #ax.plot(1, y, 'ko')
+        #ax.plot(0.794328, -169.170, 'ko')
     
-        ax.plot([0.01, 0.1], [-91, -91], 'r--', label='GS high noise model?')
+        #ax.plot([0.01, 0.1], [-91, -91], 'r--', label='GS high noise model?')
     
-        ax.grid()
+        #ax.grid()
 
         fnyqs = 0.5*df.SampleRate.unique()
 
@@ -540,15 +572,26 @@ def main():
                 f_min = config['fit_percs'][perc]['fmin']
                 f_max = config['fit_percs'][perc]['fmax']
                 db_perc = find_percentile(freq_u, db_u, newpdf_norm, frac, ax, plotline=False)
-                linregressHighFreqs(freq_u, db_perc, fnyqs, ax, f_min=f_min, f_max=f_max)
+#                x, y = linregressHighFreqs(freq_u, db_perc, fnyqs, ax, f_min=f_min, f_max=f_max)
+                slope, intercept = linregressHighFreqs(freq_u, db_perc, fnyqs, ax, f_min=f_min, f_max=f_max)
+                x_write = np.logspace(-2, np.log10(0.794328), num=9)
+                y_write = np.log10(x_write)*slope+intercept
+                
+                outfile = open('Percentiles/fit_{0}_perc.txt'.format(config['fit_percs'][perc]['perc']), 'w')
+                for i in range(len(x_write)):
+                    outfile.write('{0} {1}\n'.format(x_write[i], y_write[i]))
+                outfile.close
+
         except KeyError:
             print('no fit percentiles specified in config.json')
 
-        ax.legend(ncol=3, loc='lower center', fontsize='small')
-        ax.set_xlim(0.005,10)
-        #ax.set_xlim(0.01,10)
+        ax.legend(ncol=3, loc='lower center', fontsize='medium')
+        #ax.set_xlim(0.005,10)
+        ax.set_xlim(0.01,10)
 
-        fig.savefig('meh.png')
+        plt.tight_layout()
+        fig.savefig('pdf.png')
+        fig.savefig('pdf.eps')
 
 if __name__ == "__main__":
     main()
