@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from scipy import stats
 
 def setupPSDPlot():
@@ -14,12 +15,11 @@ def setupPSDPlot():
     nlportb = np.loadtxt(choosedir+'/Gt200_1_T-vs-dB.txt', unpack=True)
     nlpermb = np.loadtxt(choosedir+'/Perm_1_T-vs-dB.txt', unpack=True)
 
-    #fig, ax = plt.subplots(figsize=(6.5,6)) 
     fig, ax = plt.subplots(figsize=(8,6)) 
     ax.plot(nhnm[0], nhnm[1], linewidth=2, color='black')
     ax.plot(nlnm[0], nlnm[1], linewidth=2, color='black')
     #ax.plot(nhnb[0], nhnb[1], linewidth=2, ls=':', color='black')
-    ax.plot(nlportb[0], nlportb[1], linewidth=2, ls='--', color='pink')
+    ax.plot(nlportb[0], nlportb[1], linewidth=2, ls='--', color='grey', label='Low $\geq$200 sps Baseline')
     #ax.plot(nlpermb[0], nlpermb[1], linewidth=2, ls='-', color='black')
     ax.semilogx()
     ax.set_xlim(0.05, 200)
@@ -31,7 +31,7 @@ def setupPSDPlot():
 # low perm:
 #    ax.plot([0.02,0.110485],[-160,-160], color='grey', ls='-.', lw=2)
 #    ax.plot([0.110485,0.340784],[-160,-166.7], color='grey', ls='-.', lw=2)
-    ax.plot([0.02,0.110485,0.340784], [-160, -160, -166.7], color='grey', ls='-.', lw=2)
+#!    ax.plot([0.02,0.110485,0.340784], [-160, -160, -166.7], color='grey', ls='-.', lw=2, label='Low Permanent Baseline')
 # high:
     #ax.plot([0.1, 0.01], [-91.5, -91.5], color='grey', ls=':', lw=2)
  #   ax.plot([0.01, 0.03], [-90, -90], color='grey', ls=':', lw=2)
@@ -39,9 +39,20 @@ def setupPSDPlot():
  #   ax.plot([0.04, 0.065], [-88, -88], color='grey', ls=':', lw=2)
 #    ax.plot([0.065, 0.1], [-88, -91.5], color='grey', ls=':', lw=2)
 
-    ax.plot([0.01, 0.03, 0.04, 0.065, 0.1], [-90, -90, -88, -88, -91.5], color='grey', ls=':', lw=2)
+#!    ax.plot([0.01, 0.03, 0.04, 0.065, 0.1], [-90, -90, -88, -88, -91.5], color='grey', ls=':', lw=2, label='High Portable Baseline')
 
-    ax.plot([0.01, 0.110485, 0.340784], [-137.267, -160, -166.7], color='red', ls='-', lw=1)
+#    ax.plot([0.01, 0.110485, 0.340784], [-137.267, -160, -166.7], color='red', ls='-', lw=1)
+
+    
+    carlpts = [(0.07,-167.0),(0.08,-168.0),(0.09,-169.0),(0.10,-169.5),(0.11,-170.5),(0.13,-171.0),(0.14,-171.5),(0.17,-172.0),(0.20,-172.5),(0.25,-173.0),(0.30,-173.5),(0.40,-173.0),(0.50,-172.0),(0.60,-171.0),(0.70,-170.0),(0.80,-169.2)]
+ #!   for pt in carlpts:
+ #!       ax.plot(*pt, color='red', marker='o', ls='None')
+
+#    ax_freq = ax.twinx()
+#    ax_freq.set_xlabel('Frequency (Hz)')
+#    ax_freq.semilogx()
+#    ax_freq.set_xlim(1/200, 1/0.05)
+#    ax_freq.xaxis.set_label_position('top')
 
     return fig, ax
 

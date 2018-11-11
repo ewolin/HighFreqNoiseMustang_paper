@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 # pretty sure this will cover all dependencies:
+# (make sure you are subscribed to conda-forge channel before trying to create env)
 # conda create -n hfnoise python numpy requests pandas scipy obspy matplotlib
-# (make sure you are subscribed to conda-forge channel first)
+# then use
+# conda activate hfnoise
+# to activate it.
 
 import sys
 import os
 import numpy as np
-#from glob import glob
 import requests
 
 import pandas as pd
@@ -155,7 +157,7 @@ def readIRISfedcat(fedcatfile):
 def getIRISfedcat(config, outname):
     '''Get list of desired station-epochs from IRIS fedcat web service.
        Use networks, stations, locations, and channels from config file to build fedcat request.
-       Then select only those where SampleRate > min_samp_rate in config file.'''
+       Then select only those where SampleRate > min_samp_rate specified in config file.'''
 
     reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net={0}&sta={1}&loc={2}&cha={3}&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'.format(config['networks'],config['stations'], config['locations'], config['channels'])
     print('requesting list of stations')
@@ -535,7 +537,7 @@ def main():
                 newpdf_norm[i,:] = pdf[i,:]*1e-10 # np.nan*pdf[i,:]
     
         im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T*100, cmap=cmap, vmax=vmax*100)
-        fig.colorbar(im, ax=ax, label='Probability (%)')
+        fig.colorbar(im, ax=fig.axes, label='Probability (%)')
     
 # Plot PDF and save    
 # vertical dashed line at 100 Hz
@@ -585,7 +587,7 @@ def main():
         except KeyError:
             print('no fit percentiles specified in config.json')
 
-        ax.legend(ncol=3, loc='lower center', fontsize='medium')
+        ax.legend(ncol=2, loc='lower center', fontsize='medium')
         #ax.set_xlim(0.005,10)
         ax.set_xlim(0.01,10)
 
