@@ -1,5 +1,7 @@
 # HighFreqNoiseMustang_paper
-Download power spectral density probability functions (PDFPSDs) from stations of interest from IRIS MUSTANG, sum, calculate statistics, and plot
+Download power spectral density probability functions (PDFPSDs) from stations of interest from IRIS MUSTANG.
+
+Sum PSDPDFs from individual stations, calculate statistics, and plot.
 
 ## Setting up your Python environment
 Dependencies: numpy, scipy, obspy, requests, pandas, matplotlib.
