@@ -25,29 +25,26 @@ from obspy.imaging.cm import pqlx
 from obspy import UTCDateTime
 import matplotlib.pyplot as plt
 
-####
-# To do:
-# Read from config or supply as command line arg:
-#     - make list and map of nets/stns?
-#     - tradeoff: download pct_below_nlnm with value_gt > 0 the first time, and re-evaluate for various lifetime %s, 
-#                 *OR* request only for one value_gt, but would have to re-request if we decrease value_gt???
-# put some control flow in main() so we can skip straight to plotting if desired!! 
-####################################
 def readConfig(jsonfile):
     '''Parse JSON configuration file, which should contain:
        - workdir (can be '.' or path to a directory)
-       Several wildcard-able text strings that will be plugged directly into irisws fedcat URL:
+       Several wildcard-able text strings
+       that will be plugged directly into irisws fedcat URL:
        - networks
        - stations
        - locations
        - channels
        A few other values for selecting data:
        - min_samp_rate : 
-       - daily_perc_cutoff : goes into pct_below_nlnm request as value_gt parameter 
+       - daily_perc_cutoff : goes into pct_below_nlnm request 
+                             as value_gt parameter 
        - life_perc_cutoff : reject station if this % of days fall below NLNM
-       Can also contain parameters for calculating, plotting, and fitting percentiles to PDF:
-       - plot_percs: list of percentiles you want to plot. ex: "plot_percs" : [1, 2, 50, 90]
-       - fit_percs: list of percentiles to fit from fmin to fmax.  Specify like so:
+       Can also contain parameters for calculating, plotting, and fitting 
+       percentiles to PDF:
+       - plot_percs: list of percentiles you want to plot. 
+       ex: "plot_percs" : [1, 2, 50, 90]
+       - fit_percs: list of percentiles to fit from fmin to fmax.  
+       Specify like so:
        	"fit_percs" : { "perc2": 
                 {
 		"perc" : 2.0,
@@ -70,15 +67,16 @@ def readConfig(jsonfile):
     except:
         print("Error in JSON config file, please check formatting")
         sys.exit()
-####################################
 
-####################################
+
 def readIRISfedcat(fedcatfile):
-# read file returned by fedcat, clean up headers, add columns holding start/end y-m-d for MUSTANG requests
-# specify dtypes explicitly so we know what we're working with later
-# note that we also give column names including # and spaces 
-# to match format returned by IRIS fedcat request!
-# Then we clean them up using df.rename
+    ''' Read file returned by fedcat, clean up headers, add columns holding
+        start/end y-m-d for MUSTANG requests.
+        Specify dtypes explicitly so we know what we're working with later.
+        Note that we also give column names including # and spaces 
+        to match format returned by IRIS fedcat request!
+        Then we clean them up using df.rename
+        wait a minute...could we not just specify names upon reading?'''
     use_dtypes = {'#Network' : 'str',
                   ' Station ' : 'str',
                   ' Location ' : 'str',
@@ -117,30 +115,34 @@ def readIRISfedcat(fedcatfile):
     df.rename(columns=lambda x: x.strip(), inplace=True)
     df.rename(columns=lambda x: x.strip('#'), inplace=True)
 
-# check for junk row with datacenter comment and delete it
+    # Check for junk row with datacenter comment and delete it
     if df.iloc[0].Network[0] == '#':
         df = df.drop(0).reset_index(drop=True)
 
-# Replace NaN Locations with a blank character
+    # Replace NaN Locations with a blank character
     df = df.replace(pd.np.nan, '')
 
-# Make a new column w/NSCLQ target for MUSTANG
+    # Make a new column w/NSCLQ target for MUSTANG
     df['Target'] = df[['Network', 'Station', 'Location', 'Channel']].apply(lambda row: '.'.join(row.values.astype(str))+'.M', axis=1)
 
-# Add columns holding start/end y-m-d for use with MUSTANG requests
-# Round end time up to start of next day since MUSTANG noise-pdf works by day
-# Use 'today' as stopdate for most up-to-date data
-# although for reproducibility, we probably want to specify a specific end date.  Set in a config file?
-# NOTE: pandas datetime overflows for dates far in future (eg 2599 etc) so we have to work around this
-# Store StartDate and EndDate as strings for easy use in building MUSTANG URLs.
+    # Add columns holding start/end y-m-d for use with MUSTANG requests.
+    # Round end time up to start of next day since MUSTANG noise-pdf works 
+    # day by day (cannot specify end hr/min/sec).
+    # Store StartDate and EndDate as strings for easy use in building 
+    # MUSTANG URLs.
+    # Use 'today' as stopdate for most up-to-date data.
+    # For reproducibility, we specify a specific end date.  
+    # NOTE: pandas datetime overflows for dates far in future (eg 2599 etc)
+    # so we have to work around this
 #    stopdate = pd.to_datetime('today')
     stopdate = pd.to_datetime('2018-10-12')
     stopstring = stopdate.strftime('%Y-%m-%dT%H:%M:%S')
 
     starttimes = pd.to_datetime(df.StartTime)
 
-# errors = 'coerce' makes overflow values (2500, 2599, 2999 etc) get set to pd.NaT 
-# then convert, and replace all future dates w/stopdate
+    # Using argument errors = 'coerce' makes overflow values 
+    # (2500, 2599, 2999 etc) get set to pd.NaT 
+    # Then we can convert, and replace all future dates w/stopdate.
     endtimes = pd.to_datetime(df.EndTime, errors='coerce') 
     endtimes[endtimes > stopdate ] = stopdate
     endtimes = endtimes.replace(pd.NaT, stopdate)
@@ -156,8 +158,10 @@ def readIRISfedcat(fedcatfile):
 ####################################
 def getIRISfedcat(config, outname):
     '''Get list of desired station-epochs from IRIS fedcat web service.
-       Use networks, stations, locations, and channels from config file to build fedcat request.
-       Then select only those where SampleRate > min_samp_rate specified in config file.'''
+       Use networks, stations, locations, and channels from config file to
+       build fedcat request.
+       Then select only those where SampleRate > min_samp_rate specified in
+       config file.'''
 
     reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net={0}&sta={1}&loc={2}&cha={3}&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'.format(config['networks'],config['stations'], config['locations'], config['channels'])
     print('requesting list of stations')
@@ -169,10 +173,10 @@ def getIRISfedcat(config, outname):
         outfile.close()
         print('Wrote initial list to {0}'.format(outname))
 
-# parse returned text just like we'd read a CSV
+    # parse returned text just like we'd read a CSV
     df = readIRISfedcat(StringIO(res.text))
 
-# get only sample rates >= min_samp_rate, remember to reset indices!!
+    # get only sample rates >= min_samp_rate, remember to reset indices!!
     df = df[df.SampleRate >= config['min_samp_rate']].reset_index(drop=True)
     savecsv = 'irisfedcat_samprate_ge{0:d}.txt'.format(config['min_samp_rate'])
     df.to_csv(savecsv, sep='|', index=False)
@@ -181,12 +185,14 @@ def getIRISfedcat(config, outname):
 ####################################    
 
 ####################################
-def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'): 
+def checkAboveLNM(df, config, args, getplots=False, 
+                  outpbndir='PctBelowNLNM'): 
     '''For each Target and Start/EndTime in the dataframe,
        request pct_below_nlnm metric from IRIS MUSTANG
        and check that the # of days below a given percentage do not exceed
        the specified % of the station lifetime.
-       df should be a pandas dataframe with AT MINIMUM the following columns:
+       df should be a pandas dataframe 
+       with AT MINIMUM the following columns:
        Target (string, N.S.L.C.Q)
        StartDate (string, YYYY-MM-DD)
        EndDate (string, YYYY-MM-DD)'''
@@ -229,8 +235,9 @@ def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'):
 
         below_startdates = []
         below_enddates = []
-# pct_below_nlnm returns text w/2 header lines
-# and only returns days where pct_below_nlnm > value_gt (or 0 if value_gt == 0) 
+        # pct_below_nlnm returns text w/2 header lines
+        # and only returns days where pct_below_nlnm > value_gt 
+        # (or 0 if value_gt == 0) 
         text2 = [k.split(',') for k in text]
         if len(text2) > 0:
             for t in text2:
@@ -262,14 +269,12 @@ def checkAboveLNM(df, config, args, getplots=False, outpbndir='PctBelowNLNM'):
     df_selected = df.loc[useindex]
     df_selected.to_csv('irisfedcat_selected.txt', index=False, sep='|')
     return df_selected
-####################################
 
 
-####################################
 def requestPDFs(df, outpdfdir):
-    '''Request PDF PSDs from MUSTANG
-       but first, check to see if PDF file for stn epoch already exists in outpdfdir
-       If so, don't re-request unless forced'''
+    '''Request PDF PSDs from MUSTANG.  
+       Checks to see if PDF file for stn epoch already exists 
+       in outpdfdir. If so, will not re-request unless forced'''
     df_successful = df.copy()
     errorfile = open(outpdfdir+'/error.log', 'w')
     for i in df.index: 
@@ -295,55 +300,59 @@ def requestPDFs(df, outpdfdir):
     df_successful.to_csv('irisfedcat_PDFs-exist.txt', index=False, sep='|')
     errorfile.close()
     return df_successful
-####################################
 
-####################################
+
 def listPDFFiles(df, outpdfdir):
-    '''Make a list of all the PDF PSD files to read based on contents of a dataframe '''
+    '''Make a list of all the PDF PSD files to read 
+       based on contents of a dataframe.'''
     pdffiles = []
     for i in df.index:
         pdffile = outpdfdir+'/'+df.Target[i]+'_'+df.StartDate[i]+'_'+df.EndDate[i]+'.txt'
         pdffiles.append(pdffile)
     return pdffiles
-####################################
 
-####################################
+
 def findPDFBounds(pdffiles):
-# need to find a way to write out unique frequency STRINGS as well for lookup in calcMegaPDF
     '''Get lists of unique frequencies and dBs
        from all individual PDF files'''
     print('finding list of unique freq, dB')
-    df_single = pd.read_csv(pdffiles[0], skiprows=5, names=['freq', 'db', 'hits'])
+    df_single = pd.read_csv(pdffiles[0], skiprows=5, 
+                            names=['freq', 'db', 'hits'])
     freq_u = df_single.freq.unique()
     db_u = df_single.db.unique()
     for i in range(1,len(pdffiles)):
-        df_single =  pd.read_csv(pdffiles[i], skiprows=5, names=['freq', 'db', 'hits'])
+        df_single =  pd.read_csv(pdffiles[i], skiprows=5, 
+                                 names=['freq', 'db', 'hits'])
         freq_u = np.unique(np.append(freq_u, df_single.freq.unique()))
         db_u = np.unique(np.append(db_u, df_single.db.unique()))
     np.save('freq_u.npy', freq_u)
     np.save('db_u.npy', db_u)
     return freq_u, db_u
-####################################
 
-####################################
+
 def findUniqFreq(pdffiles):
     '''Find unique frequency values as *strings* for quick lookup in calcMegaPDF''' 
-    df_single = pd.read_csv(pdffiles[0], skiprows=5, names=['freq', 'db', 'hits'], dtype={'freq':'str'})
+    df_single = pd.read_csv(pdffiles[0], skiprows=5, 
+                            names=['freq', 'db', 'hits'], 
+                            dtype={'freq':'str'})
     freq_u = df_single.freq.unique()
     for i in range(1,len(pdffiles)):
-        df_single =  pd.read_csv(pdffiles[i], skiprows=5, names=['freq', 'db', 'hits'], dtype={'freq':'str'})
+        df_single =  pd.read_csv(pdffiles[i], skiprows=5, 
+                                 names=['freq', 'db', 'hits'], 
+                                 dtype={'freq':'str'})
         freq_u = np.unique(np.append(freq_u, df_single.freq.unique()))
     outfile = open('freq_u_str.txt', 'w')
     for i in range(len(freq_u)):
         outfile.write('{0}\n'.format(freq_u[i]))
     outfile.close()
     isort = np.argsort(freq_u.astype('float'))
-#    freq_u.sort()
     freq_u = freq_u[isort]
     np.save('freq_u_str.npy', freq_u)
     return freq_u
-####################################
-def calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles, outpdffile='megapdf.npy'):
+
+
+def calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles, 
+                outpdffile='megapdf.npy'):
     '''Add together all PDF PSDs in pdffiles!
        And save as .npy file for easier reading later'''
     # Set up dictionaries to convert freq and db to integers
