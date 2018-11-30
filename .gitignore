@@ -105,3 +105,4 @@ venv.bak/
 *.swp
 used.txt
 notused.txt
+noiseplot.py.backup
