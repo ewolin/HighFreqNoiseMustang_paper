@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -8,21 +9,14 @@ from cycler import cycler
 
 
 def plotBrune(ax):
+    '''Plot Brune corner frequencies for mag/dist ranges of interest
+    (see esupp for details on calculation)'''
+    dirname = os.path.dirname(__file__)
+    brunecsv = os.path.join(dirname,'brune-all.csv')
+    #brunecsv='/Users/ewolin/HighFreqNoiseMustang/brune-all.csv'
 
-    # Brune spectra:
-#    ax.plot(0.0109, -130.427, marker='*') # M0.5 at 1 km
-#    ax.plot(0.109, -136.005, marker='*') # M2.5 at 100 km
-#    ax.plot(0.109, -110.726, marker='*') # M2.5 at 10 km
-#    ax.plot(0.109, -90.198, marker='*') # M0.5 at 1 km
-
-    gridcolor='#d62728' #new mpl style: red
-    gridcolor='#9467bd' #new mpl style: purple
-    gridcolor='#36b1bf' # light blue
-    gridcolor='limegreen' 
     gridcolor='#1f77b4' # darker blue
-#    gridcolor='#bcbd22' # darker blue
 
-    brunecsv='/Users/ewolin/research/NewNewNoise/brune-all.csv'
     linestyle={'color' : gridcolor,
                'mfc' : gridcolor,
                'linewidth' : 1,
