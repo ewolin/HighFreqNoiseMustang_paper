@@ -15,9 +15,11 @@ conda activate hfnoise
 
 ## Reproducing plots in paper
 Plots in Figure 1 can be reproduced by running the code as follows:
-(Run in the appropriate directory so you have the correct config file as well)
+
 Each subfigure a-d has its own directory:
+
 GS | PERM | GE200 | TA
+
 Each folder contains a file called config.json and irisfedcat_[GS|PERM|GE200|TA].txt.
 
 ```bash
