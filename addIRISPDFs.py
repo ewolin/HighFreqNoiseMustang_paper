@@ -199,7 +199,7 @@ def checkAboveLNM(df, config, args, getplots=False,
     usedfile = open('used.txt', 'w')
     for i in df.index: 
         outpbnname = outpbndir+'/{0}_{1}_{2}.txt'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
-        if args.force_get_PDFs or (not os.path.exists(outpbnname)):
+        if args.force_lnm_check or (not os.path.exists(outpbnname)):
             reqbase = 'http://service.iris.edu/mustang/measurements/1/query?metric=pct_below_nlnm&format=text&nodata=404&orderby=start_asc'
             reqstring = reqbase+'&target={0}&value_gt={1}&start={2}&end={3}'.format(df.Target[i],config['daily_perc_cutoff'],df.StartDate[i],df.EndDate[i])
             res = requests.get(reqstring)
@@ -249,11 +249,13 @@ def checkAboveLNM(df, config, args, getplots=False,
         else: 
             lifetime_pct_below = 0.
         if lifetime_pct_below <= config['life_perc_cutoff']:
-            usedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartDate[i], df.EndDate[i]))
+            usedfile.write('{0} {1} {2}\n'.format(df.Target[i], 
+                           df.StartDate[i], df.EndDate[i]))
             useindex.append(i)
             termcolor=32
         else:
-            notusedfile.write('{0} {1} {2}\n'.format(df.Target[i], df.StartDate[i], df.EndDate[i]))
+            notusedfile.write('{0} {1} {2}\n'.format(df.Target[i], 
+                              df.StartDate[i], df.EndDate[i]))
             termcolor=31
 
         # fancy color prompt :)
@@ -267,7 +269,7 @@ def checkAboveLNM(df, config, args, getplots=False,
     return df_selected
 
 
-def requestPDFs(df, outpdfdir):
+def requestPDFs(df, args, outpdfdir):
     '''Request PDF PSDs from MUSTANG.  
     Checks to see if PDF file for stn epoch already exists in outpdfdir. 
     If so, will not re-request unless forced.
@@ -276,7 +278,7 @@ def requestPDFs(df, outpdfdir):
     errorfile = open(outpdfdir+'/error.log', 'w')
     for i in df.index: 
         outname = outpdfdir+'/{0}_{1}_{2}.txt'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
-        if not os.path.exists(outname):
+        if args.force_get_PDFs or (not os.path.exists(outname)):
             print('requesting PDF PSD for:', df.Target[i])
             reqbase = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=text&nodata=404'
             reqstring = reqbase + '&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
@@ -359,19 +361,21 @@ def calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles,
     '''Add together all PSDPDFs in pdffiles!
     And save as .npy file for easier reading later
     '''
-    # Set up dictionaries to convert freq and db to integers
+    # Set up dictionaries to convert freq and db to integers.
+    # Use integers for freq to avoid floating point errors
+    # and make binning faster.
     i_f = np.arange(len(freq_u_str))
     fd = dict(zip(freq_u_str, i_f))
-    print(fd)
 
     i_db = np.arange(len(db_u))
     dbd = dict(zip(db_u, i_db))
     pdf = np.zeros((len(i_f), len(i_db)), dtype=np.int_)
     
     # Sum all files to make mega-pdf
+    print('Adding individual PDFs to composite, please wait...')
+    logfile = open('pdffiles.txt','w')
     for infile in pdffiles:
-        print('adding to PDF:',infile.split('/')[-1])
-        # Read input file
+        logfile.write('{0}\n'.format(infile.split('/')[-1]))
         freq = np.loadtxt(infile, unpack=True, delimiter=',', usecols=0)
         db, hits = np.loadtxt(infile, unpack=True, delimiter=',', 
                               usecols=[1,2], dtype=np.int_)
@@ -383,8 +387,9 @@ def calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles,
             i_f1 = fd[str(f1)]
             i_db1 = dbd[db1]
             pdf[i_f1, i_db1] += hit1
+    logfile.close()
 
-    # Save PDF to a numpy file so we can plot it easily later
+    # Save PDF to a numpy file so we can read+plot it easily later
     np.save(outpdffile, pdf)
     outpdftext = open('megapdf.txt', 'w')
     outpdftext.write('#freq db hits\n')
@@ -393,14 +398,19 @@ def calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles,
             outpdftext.write('{0} {1} {2}\n'.format(freq_u[i_f], db_u[i_db],
                              pdf[i_f,i_db]))
     outpdftext.close()
+    print('Finished calculating composite PDF.') 
+    print('See pdffiles.txt for list of individual PDFs summed.')
             
     return pdf
 
 
 def find_percentile(freq_u, db_u, newpdf_norm, perc, ax, fnyqs=[], 
                     plotline=True):
-    '''Given a (normalized) PDF, find the dB levels of a given percentile'''
-# surely there must be something in numpy or scipy that does this but I haven't hunted it down yet.
+    '''Given a (normalized) PDF, find the dB levels of a given percentile.
+    Ignore frequencies between 0.75*fnyq and fnyq to cut out spikes.
+    '''
+    # surely there must be something in numpy or scipy that does this 
+    # but I haven't hunted it down yet.
     nfreq = len(freq_u)
     db_perc = -999*np.ones(nfreq) 
     for i in range(nfreq):
@@ -411,10 +421,8 @@ def find_percentile(freq_u, db_u, newpdf_norm, perc, ax, fnyqs=[],
             if(dum >= perc):
                 db_perc[i] = db_u[j]
                 break
-    # plot percentile line ignoring spikes near Nyquist frequency(ies)
-# !!! I think redefining freq_u and db_perc for plotting could be a problem here
-# could cause unexpected behavior later in script bc we only return db_perc?
-# fix this weekend
+    # plot and/or write percentile line 
+    # ignoring spikes near Nyquist frequency(ies)
     i_use, = np.where(freq_u < 200)
     freq_u = freq_u[i_use]
     db_perc = db_perc[i_use]
@@ -422,14 +430,10 @@ def find_percentile(freq_u, db_u, newpdf_norm, perc, ax, fnyqs=[],
     for fnyq in fnyqs:
         i_nonyq, = np.where((freq_u > fnyq) | (freq_u <0.75*fnyq))
         i_use = np.intersect1d(i_use, i_nonyq)
-    print(max(freq_u[i_use]))
-    print(freq_u[i_use])
-    print(fnyqs)
-#    print(1./freq_u[i_use])
     freq_perc = freq_u[i_use]
     db_perc = db_perc[i_use]
     if plotline:
-        ax.plot(1./freq_u[i_use], db_perc[i_use], 
+        ax.plot(1./freq_perc, db_perc, 
                 label='{0:.1f}%'.format(100*perc), linewidth=2)
     outname = 'Percentiles/percentile_{0:.1f}.txt'.format(100*perc)
     outfile = open(outname,'w')
@@ -441,9 +445,10 @@ def find_percentile(freq_u, db_u, newpdf_norm, perc, ax, fnyqs=[],
     return freq_perc, db_perc
 
 
-def linregressHighFreqs(f, db, fnyqs, perc_name, ax, f_min=3, f_max=100, plotline=False):
+def linregressHighFreqs(f, db, fnyqs, perc_name, ax, f_min=3, f_max=100, 
+                        plotline=False):
     '''Fit a line to a given PDF percentile between f_max and f_min.
-    Ignore frequencies from 0.75*fnyq and fnyq to cut out spikes
+    Ignore frequencies between 0.75*fnyq and fnyq to cut out spikes
     '''
     iclip, = np.where((f >= f_min) & (f <= f_max))
     print(iclip)
@@ -456,7 +461,6 @@ def linregressHighFreqs(f, db, fnyqs, perc_name, ax, f_min=3, f_max=100, plotlin
     x = f[i_use]
     y = db[i_use]
     # convert to period and take log10 so we can do a linear fit 
-    # and then easily plot with setupPSDPlot
     x_log = np.log10(1./x)
     slope, intercept, r_value, p_value, std_err = stats.linregress(x_log,y)
     y_new = x_log*slope+intercept
@@ -487,119 +491,125 @@ def main():
     if args.doall:
         args.request_stns = True
         args.lnm_check = True
+        args.force_lnm_check = True
         args.get_PDFs = True
+        args.force_get_PDFs = True
         args.calc_PDF = True
         args.plot_PDF = True
+    if args.force_lnm_check:
+        args.lnm_check = True
+    if args.force_get_PDFs:
+        args.get_PDFs = True
 
     config = readConfig('config.json')
 
-# Create output directories if they don't exist
+    # Create output directories if they don't exist
     workdir = config['workdir']
     outpdfdir = workdir+'/IndividualPDFs'
-    outpercdir = workdir+'/Percentiles' # to do: supply as arg to checkAboveLNM, write percentile files to this dir
+    outpercdir = workdir+'/Percentiles' 
     outpbndir = workdir+'/PctBelowNLNM'
     for outdir in [workdir, outpdfdir, outpercdir, outpbndir]:
         if not os.path.exists(outdir):
             os.mkdir(outdir)
-            print('created', outdir)
-        else:
-            print('exists', outdir)
 
-
+    # Request or read list of stations to use in PDF calculation
     if args.request_stns:
         outname = 'irisfedcat_initial.txt'
         df = getIRISfedcat(config, outname)
     else:
-        df = readIRISfedcat(args.read_stns)
+        try:
+            df = readIRISfedcat(args.read_stns)
+        except ValueError as e:
+            print('ERROR: no list of stations provided. Use --request_stns to query IRIS, or use --read_stns <file.txt> to supply a file in iris fedcatalog format')
+            sys.exit(1)
+        except FileNotFoundError as e:
+            print('ERROR: could not find file {0}'.format(args.read_stns))
+            sys.exit(1)
 
+    # Check if stations are above Peterson NLNM
     if args.lnm_check:
         df_selected = checkAboveLNM(df, config, args)
     else:
         df_selected = df.copy()
 
+    # Request PDFs from IRIS
     if args.get_PDFs:
-        df_selected = requestPDFs(df_selected, outpdfdir)
+        df_selected = requestPDFs(df_selected, args, outpdfdir)
 
+    # Get list of existing PDFs for individual stations
     pdffiles = listPDFFiles(df_selected, outpdfdir)
 
-# Find min/max freqs and dBs and sum PDFs    
+    # Sum all individual station PDFs to produce composite pdf
+    # or read results from a previous calculation
     if args.calc_PDF:
         freq_u, db_u = findPDFBounds(pdffiles)
         freq_u_str = findUniqFreq(pdffiles)
         pdf = calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles)
     elif args.plot_PDF:
-        freq_u = np.load('freq_u.npy')
-        freq_u_str = np.load('freq_u_str.npy')
-        db_u = np.load('db_u.npy')
-        pdf = np.load('megapdf.npy')
-
-# Plot PDF
+        try:
+            freq_u = np.load('freq_u.npy')
+            freq_u_str = np.load('freq_u_str.npy')
+            db_u = np.load('db_u.npy')
+            pdf = np.load('megapdf.npy')
+        except FileNotFoundError as e:
+            print(e)
+            print('Could not find an input file needed for PDF plotting.')
+            print('Run again with --calc_PDF option.')
+            sys.exit(1)
+    # Plot composite PDF
     if args.plot_PDF:
-#        cmap = pqlx
-#        vmax=0.30
-#        cmap = 'bone_r'
         cmap = 'gray_r'
-        #cmap = 'magma_r'
-#        cmap = 'viridis_r'
         vmax=0.05
         fig, ax = setupPSDPlot()
-        print(fig.axes)
     
-# Normalize PDF since MUSTANG returns hit counts not %
+        # Normalize PDF since MUSTANG returns hit counts not %
         newpdf_norm = np.zeros(shape=pdf.shape, dtype=np.float_)
         for i in range(len(freq_u)):
             if np.sum(pdf[i,:]) > 0:
                 newpdf_norm[i,:] = pdf[i,:]/np.sum(pdf[i,:])
             else:
-                newpdf_norm[i,:] = pdf[i,:]*0 #1e-10 # np.nan*pdf[i,:]
+                newpdf_norm[i,:] = pdf[i,:]*0 
         outpdfnorm = open('megapdf_norm.txt', 'w')
         outpdfnorm.write('#freq db hits \n')
         for i_f in range(len(freq_u)):
             for i_db in range(len(db_u)):
-                outpdfnorm.write('{0} {1} {2}\n'.format(freq_u[i_f], db_u[i_db], newpdf_norm[i_f, i_db]))
+                outpdfnorm.write('{0} {1} {2}\n'.format(freq_u[i_f], 
+                                  db_u[i_db], newpdf_norm[i_f, i_db]))
         outpdfnorm.close()
 
-        im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T*100, cmap=cmap, vmax=vmax*100) 
+        # Plot normalized PDF!
+        im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T*100, cmap=cmap, 
+                           vmax=vmax*100) 
         fig.colorbar(im, cax=fig.axes[1], label='Probability (%)')
     
-# Plot PDF and save    
-# vertical dashed line at 100 Hz
-        ax.plot([0.01, 0.01], [-200, -50], ls='--', color='grey')
-        #ax.plot([0.01, 0.3], [-137, -162], 'k--', label='200 sps noise model')
-        #ax.plot([0.01, 0.731139], [-137,-168.536389686], 'c:', lw=3, label='200 sps noise model')
-        #ax.plot([0.01, 1], [-137,-170.849624626], 'y:', lw=2, label='200 sps noise model')
-        dlogperiod = np.log10(0.3) - np.log10(0.01)
-        ddb = -137 - -162
-        y = -137 + ddb/dlogperiod * (np.log10(0.01)-np.log10(0.73))
-        #print(y)
-        #ax.plot(1, y, 'ko')
-        #ax.plot(0.794328, -169.170, 'ko')
-    
-        #ax.plot([0.01, 0.1], [-91, -91], 'r--', label='GS high noise model?')
-    
-        #ax.grid()
 
+        # Calculate and plot specified percentiles
         fnyqs = 0.5*df.SampleRate.unique()
-
-# Plot specified percentiles
         try:
             for perc in config['plot_percs']:
                 frac = perc/100.
-                freq_perc, db_perc = find_percentile(freq_u, db_u, newpdf_norm, frac, ax, plotline=True, fnyqs=fnyqs)
+                freq_perc, db_perc = find_percentile(freq_u, db_u, 
+                                                     newpdf_norm, frac, 
+                                                     ax, plotline=True, 
+                                                     fnyqs=fnyqs)
         except KeyError as e:
             print(e)
             print('no plot percentiles specified in config.json')
-            print('ex: "plot_percs" : [1, 2, 50, 90]')
 
-# Fit a line to specified percentiles and plot
+        # Compute a linear fit specified percentiles and plot line
         try:
             for perc in config['fit_percs']:
                 frac = config['fit_percs'][perc]['perc']/100.
                 f_min = config['fit_percs'][perc]['fmin']
                 f_max = config['fit_percs'][perc]['fmax']
-                freq_perc, db_perc = find_percentile(freq_u, db_u, newpdf_norm, frac, ax, plotline=False)
-                slope, intercept = linregressHighFreqs(freq_perc, db_perc, fnyqs, perc,
-                                                       ax, f_min=f_min, f_max=f_max,  
+                freq_perc, db_perc = find_percentile(freq_u, db_u, 
+                                                     newpdf_norm, frac, 
+                                                     ax, plotline=False,
+                                                     fnyqs=fnyqs)
+                slope, intercept = linregressHighFreqs(freq_perc, db_perc, 
+                                                       fnyqs, perc, ax, 
+                                                       f_min=f_min, 
+                                                       f_max=f_max,  
                                                        plotline=False)
         except KeyError:
             print('no fit percentiles specified in config.json')
@@ -613,13 +623,17 @@ def main():
         ax_freq.xaxis.set_label_position('top')
         ax_freq.tick_params(axis='x', top=True, labeltop=True) 
         
-        print(fig.axes)
         # Final setup: Draw legend and set period axis limits
         ax.legend(ncol=2, loc='lower center', fontsize='6', handlelength=3)
         ax.set_xlim(0.01,10)
         plt.tight_layout()
-        fig.savefig('pdf.png')
-        fig.savefig('pdf.eps')
+
+        # Save images of plots
+        for imgtype in ['png', 'eps']:
+            fig.savefig('pdf.'+imgtype)
+            print('saved plot as pdf.{0}'.format(imgtype))
+
+    print('Finished')
 
 if __name__ == "__main__":
     main()
