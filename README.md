@@ -13,6 +13,32 @@ conda create -n hfnoise python numpy requests pandas scipy obspy matplotlib
 conda activate hfnoise
 ```
 
+## Overview of code
+
+### Request or read list of stations
+
+irisws fedcatalog service returns a file with these headers:
+```
+#Network | Station | Location | Channel | Latitude | Longitude | Elevation | Depth | Azimuth | Dip | SensorDescription | Scale | ScaleFreq | ScaleUnits | SampleRate | StartTime | EndTime
+```
+The script will output other files named irisfedcat_* with slightly cleaner headers:
+```
+Network|Station|Location|Channel|Latitude|Longitude|Elevation|Depth|Azimuth|Dip|SensorDescription|Scale|ScaleFreq|ScaleUnits|SampleRate|StartTime|EndTime|Target|StartDate|EndDate|TotalTime
+```
+
+### Check pct\_below\_nlnm metric
+Write to directory PctBelowNLNM
+
+### Get PDFs
+Write to directory IndividualPDFs
+
+### Calculate composite PDF
+Save as megapdf.npy
+
+### Plot composite PDF and selected percentiles
+Save percentiles in directory Percentiles
+Save plot as pdf.*
+
 ## Reproducing plots in paper
 Plots in Figure 1 can be reproduced by running the code as follows:
 
@@ -35,4 +61,4 @@ To download data for your own network(s)/station(s)/channel(s) etc. of interest,
 ```bash
 addIRISPDFs.py --doall
 ```
-and let the script fetch the list of stations for you.
+The script will fetch the list of stations for you and then do all of the other processing.
