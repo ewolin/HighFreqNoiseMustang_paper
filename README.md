@@ -46,8 +46,15 @@ addIRISPDFs.py --read_stns myfedcatfile.txt --plot_PDF
 ```
 (useful if you just want to tweak plotting parameters)
 
+# Simple example
+A quick way to test the script and config file is to run it for a single station.  The config.json file in Examples/SingleStation will fetch and calculate a single PDF for SPREE station XI.SN54.  (One of my favorite stations, located on a beautiful sand prairie in Wisconsin.) 
+```bash
+cd Examples/SingleStation
+addIRISPDF.py --doall
+```
 
 ## Sample config.json file
+plot_percs and fit_percs are optional; all other keys must be defined.
 ```json
 {
 	"workdir" : ".",
