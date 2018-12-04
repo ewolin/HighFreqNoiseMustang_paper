@@ -18,12 +18,12 @@ Plots in Figure 1 can be reproduced by running the code as follows:
 
 Each subfigure a-d has its own directory:
 
-GS | PERM | GE200 | TA
+GS | PERM | PORT | TA
 
 Each folder contains a file called config.json and irisfedcat_[GS|PERM|GE200|TA].txt.
 
 ```bash
-addIRISPDFs.py --read_stns irisfedcat_[GS|PERM|GE200|TA].txt --lnm_check --get_PDFs --calc_PDFs --plot_PDF
+addIRISPDFs.py --read_stns irisfedcat_[GS|PERM|PORT|TA].txt --lnm_check --get_PDFs --calc_PDFs --plot_PDF
 ```
 
 ## Using the code on your own
@@ -89,20 +89,25 @@ Request MUSTANG's [pct\_below\_nlnm](http://service.iris.edu/mustang/metrics/doc
 Request PSDPDFs from MUSTANG's [noise-pdf](http://service.iris.edu/mustang/noise-pdf/1/) metric.  Write to directory IndividualPDFs.  Write irisfedcat_PDFs-exist.txt to workdir.
 
 ### Calculate composite PDF
-Sum all specified individual PDFs. Save composite pdf as megapdf.npy (really a histogram, with number of counts in each bin) and megapdf\_norm.npy (an actual PDF, where all values at a given frequency sum to 1.)  and list of freq and dB as freq\_u.npy and db\_u.npy.
+Sum all specified individual PDFs. Save composite pdf as megapdf.npy (really a histogram, with number of counts in each bin) and megapdf\_norm.npy (an actual PDF, where all values at a given frequency sum to 1).  Also save list of freq and dB as freq\_u.npy and db\_u.npy.
 
 If you want to read and plot these output files later: 
 ```python
 import numpy as np
+from noiseplot import setupPSDPlot
+
 freq_u = np.load('freq_u.npy')
 db_u = np.load('db_u.npy')
 pdf = np.load('megapdf.npy') # PDF in terms of bin counts
 pdf_norm = np.load('megapdf.npy') # PDF in percent
+
 # PDFs are indexed as pdf[freq, dB]
 # so you can get the histogram slice at the lowest frequency with pdf[0,:]
 # handy trick to calculate # of PSDs:
 sum(pdf[0,:])
+
 # To plot with setupPSDPlot you must transpose the pdf:
+# (in this example we also multiply by 100 so we get probability in percent)
 fig, ax = setupPSDPlot()
 im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T*100, cmap='gray_r', 
                    vmax=0.05*100)

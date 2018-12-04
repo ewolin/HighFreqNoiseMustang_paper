@@ -1,0 +1,11 @@
+{
+	"workdir" : ".",
+	"networks" : "GS",
+	"stations" : "*",
+	"locations" : "*",
+	"channels" : "*HZ",
+	"min_samp_rate" : 100,
+	"daily_perc_cutoff" : 10.0,
+	"life_perc_cutoff" : 10.0,
+        "plot_percs" : [1,50,90]
+}
