@@ -451,26 +451,38 @@ def linregressHighFreqs(f, db, fnyqs, perc_name, ax, f_min=3, f_max=100,
     Ignore frequencies between 0.75*fnyq and fnyq to cut out spikes
     '''
     iclip, = np.where((f >= f_min) & (f <= f_max))
-    print(iclip)
     i_use = iclip
     for i in range(len(fnyqs)):
         i_nonyq, = np.where((f>fnyqs[i]) | (f<0.75*fnyqs[i]))
-        print(i_nonyq)
-        print(fnyqs[i],np.intersect1d(i_use, i_nonyq))
+        #print(i_nonyq)
+        #print(fnyqs[i],np.intersect1d(i_use, i_nonyq))
         i_use = np.intersect1d(i_use, i_nonyq)
     x = f[i_use]
     y = db[i_use]
     # convert to period and take log10 so we can do a linear fit 
     x_log = np.log10(1./x)
     slope, intercept, r_value, p_value, std_err = stats.linregress(x_log,y)
+    print('slope, intercept of best fit line:', slope, intercept)
     y_new = x_log*slope+intercept
     if plotline:
         ax.plot(1./x, y_new, lw=1, color='black', ls=':')
+
+    # Extend linear fit to 1.25 Hz (0.8 s) 
+    # (for matching portable 1st percentile to NLNM)
+    log_extend = np.linspace(np.log10(1.25), 2, 8)
+    f_extend = 10**log_extend
+    y_extend = np.log10(1./f_extend)*slope+intercept
     outfile = open('Percentiles/fit_{0}_perc.txt'.format(perc_name), 'w')
     outfile.write('T_s, dB\n')
     for i in range(len(x)):
         outfile.write('{0} {1}\n'.format(1./x[i], y_new[i]))
     outfile.close()
+    outfile = open('Percentiles/fit_{0}_extend_perc.txt'.format(perc_name), 'w')
+    outfile.write('T_s, dB\n')
+    for i in range(len(f_extend)):
+        outfile.write('{0} {1}\n'.format(1./f_extend[i], y_extend[i]))
+    outfile.close()
+
     return slope, intercept
 
 
