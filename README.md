@@ -40,7 +40,7 @@ The script will fetch a list of stations for you and then do all of the other pr
 addIRISPDFs.py --read_stns myfedcatfile.txt --lnm_check --get_PDFs --calc_PDF --plot_PDF
 ```
 
-Once you have calculated the PDF you can re-plot it with
+Once you have calculated the composite PDF you can re-plot it with
 ```bash
 addIRISPDFs.py --read_stns myfedcatfile.txt --plot_PDF
 ```
@@ -83,14 +83,31 @@ Network|Station|Location|Channel|Latitude|Longitude|Elevation|Depth|Azimuth|Dip|
 You can also supply your own list of stations in fedcatalog format. 
 
 ### Check pct\_below\_nlnm metric
-Request MUSTANG's [pct\_below\_nlnm](http://service.iris.edu/mustang/metrics/docs/1/desc/pct_below_nlnm/) metric and flag stations with more than life_perc_cutoff percent of days exceeding daily_perc_cutoff pct\_below\_nlnm.  (Set cutoffs in config.json.).  Write pct\_below\_nlnm results for individual stations to directory PctBelowNLNM.  Write irisfedcat_passLNMcheck.txt to workdir.
+Request MUSTANG's [pct\_below\_nlnm](http://service.iris.edu/mustang/metrics/docs/1/desc/pct_below_nlnm/) metric and reject stations with more than life_perc_cutoff percent of days exceeding daily_perc_cutoff pct\_below\_nlnm.  (Set cutoffs in config.json.)  Ex: Reject stations for which more than 10% days in their lifetime have more than 10% of points below the NLNM.  Write pct\_below\_nlnm results for individual stations to directory PctBelowNLNM.  Write irisfedcat_passLNMcheck.txt to workdir.
 
 ### Get PDFs
 Request PSDPDFs from MUSTANG's [noise-pdf](http://service.iris.edu/mustang/noise-pdf/1/) metric.  Write to directory IndividualPDFs.  Write irisfedcat_PDFs-exist.txt to workdir.
 
 ### Calculate composite PDF
-Sum all individual PDFs (that passed the pct\_below\_nlnm check, if applied)
- and save as megapdf.npy.
+Sum all specified individual PDFs. Save composite pdf as megapdf.npy (really a histogram, with number of counts in each bin) and megapdf\_norm.npy (an actual PDF, where all values at a given frequency sum to 1.)  and list of freq and dB as freq\_u.npy and db\_u.npy.
+
+If you want to read and plot these output files later: 
+```python
+import numpy as np
+freq_u = np.load('freq_u.npy')
+db_u = np.load('db_u.npy')
+pdf = np.load('megapdf.npy') # PDF in terms of bin counts
+pdf_norm = np.load('megapdf.npy') # PDF in percent
+# PDFs are indexed as pdf[freq, dB]
+# so you can get the histogram slice at the lowest frequency with pdf[0,:]
+# handy trick to calculate # of PSDs:
+sum(pdf[0,:])
+# To plot with setupPSDPlot you must transpose the pdf:
+fig, ax = setupPSDPlot()
+im = ax.pcolormesh(1./freq_u, db_u, newpdf_norm.T*100, cmap='gray_r', 
+                   vmax=0.05*100)
+fig.colorbar(im, cax=fig.axes[1], label='Probability (%)')
+```
 
 ### Plot composite PDF and selected percentiles
 Compute percentiles from composite PDF.  

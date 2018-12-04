@@ -582,6 +582,7 @@ def main():
                 newpdf_norm[i,:] = pdf[i,:]/np.sum(pdf[i,:])
             else:
                 newpdf_norm[i,:] = pdf[i,:]*0 
+        np.save('megapdf_norm.npy')
         outpdfnorm = open('megapdf_norm.txt', 'w')
         outpdfnorm.write('#freq db hits \n')
         for i_f in range(len(freq_u)):
