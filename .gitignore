@@ -107,3 +107,4 @@ used.txt
 notused.txt
 noiseplot.py.backup
 addIRISPDFs.py.backup
+*.swo

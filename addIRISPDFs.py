@@ -265,7 +265,8 @@ def checkAboveLNM(df, config, args, getplots=False,
     notusedfile.close()
     np.save('useindices.npy', useindex)
     df_selected = df.loc[useindex]
-    df_selected.to_csv('irisfedcat_selected.txt', index=False, sep='|')
+    #df_selected.to_csv('irisfedcat_selected.txt', index=False, sep='|')
+    df_selected.to_csv('irisfedcat_passLNMcheck.txt', index=False, sep='|')
     return df_selected
 
 
