@@ -29,13 +29,23 @@ addIRISPDFs.py --read_stns irisfedcat_[GS|PERM|GE200|TA].txt --lnm_check --get_P
 ## Using the code on your own
 To download data for your own network(s)/station(s)/channel(s) etc. of interest, you can either:
 
-(a) use the [irisws-fedcatalog](http://service.iris.edu/irisws/fedcatalog/1/) web service to download a pipe-separated list of stations you are interested in, edit as desired, and supply the name of this text file as an argument to the --read_stns argument;
-
-(b) copy and edit config.json, then run 
+(a) copy and edit config.json, then run 
 ```bash
 addIRISPDFs.py --doall
 ```
-The script will fetch the list of stations for you and then do all of the other processing.
+The script will fetch a list of stations for you and then do all of the other processing.
+
+(b) use the [irisws-fedcatalog](http://service.iris.edu/irisws/fedcatalog/1/) web service to download a pipe-separated list of stations you are interested in, edit if desired, and supply the name of this text file as an argument to the --read_stns argument:
+```bash
+addIRISPDFs.py --read_stns myfedcatfile.txt --lnm_check --get_PDFs --calc_PDF --plot_PDF
+```
+
+Once you have calculated the PDF you can re-plot it with
+```bash
+addIRISPDFs.py --read_stns myfedcatfile.txt --plot_PDF
+```
+(useful if you just want to tweak plotting parameters)
+
 
 ## Sample config.json file
 ```json
@@ -66,7 +76,7 @@ It returns a file with the following headers:
 ```
 #Network | Station | Location | Channel | Latitude | Longitude | Elevation | Depth | Azimuth | Dip | SensorDescription | Scale | ScaleFreq | ScaleUnits | SampleRate | StartTime | EndTime
 ```
-The script will read a fedcatalog file into a pandas dataframe, clean up the header names, select only stations with sample rates >= min_samp_rate, and add a few columns for use later in the script.  Other irisfedcat_*txt will have these headers: 
+The script will read a fedcatalog file into a pandas dataframe, clean up the header names, select only stations with sample rates >= min_samp_rate, and add a few columns for use later in the script.  Other irisfedcat_*txt files written out by the script will have these headers: 
 ```
 Network|Station|Location|Channel|Latitude|Longitude|Elevation|Depth|Azimuth|Dip|SensorDescription|Scale|ScaleFreq|ScaleUnits|SampleRate|StartTime|EndTime|Target|StartDate|EndDate|TotalTime
 ```
