@@ -20,7 +20,7 @@ Each subfigure a-d has its own directory:
 
 GS | PERM | PORT | TA
 
-Each folder contains a file called config.json and irisfedcat_[GS|PERM|GE200|TA].txt.
+Each folder contains a file called config.json and irisfedcat_[GS|PERM|PORT|TA].txt.
 
 ```bash
 addIRISPDFs.py --read_stns irisfedcat_[GS|PERM|PORT|TA].txt --lnm_check --get_PDFs --calc_PDFs --plot_PDF
@@ -47,7 +47,7 @@ addIRISPDFs.py --read_stns myfedcatfile.txt --plot_PDF
 (useful if you just want to tweak plotting parameters)
 
 ### Simple example
-A quick way to test the script and config file is to run it for a single station.  The config.json file in Examples/SingleStation will fetch and calculate a single PDF for SPREE station XI.SN54.  (One of my favorite stations, located on a beautiful sand prairie in Wisconsin.) 
+A quick way to test the script and config file is to run it for a single station.  The config.json file in Examples/SingleStation will fetch and calculate a single PDF for SPREE station XI.SN54.  (This was one of my favorite stations to visit, located on a beautiful sand prairie in Wisconsin.) 
 ```bash
 cd Examples/SingleStation
 addIRISPDF.py --doall
