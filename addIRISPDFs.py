@@ -17,8 +17,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
-from obspy import UTCDateTime
+from scipy.interpolate import interp1d
+from obspy import UTCDateTime, read_inventory
 from obspy.imaging.cm import pqlx
+from obspy.signal.spectral_estimation import get_nlnm
 
 from noiseplot import setupPSDPlot
 
@@ -120,6 +122,7 @@ def readIRISfedcat(fedcatfile):
 
     # Replace NaN Locations with a blank character
     df = df.replace(pd.np.nan, '')
+    df = df.replace('--', '')
 
     # Make a new column w/NSCLQ target for MUSTANG
     df['Target'] = df[['Network', 'Station', 'Location', 'Channel']].apply(lambda row: '.'.join(row.values.astype(str))+'.M', axis=1)
@@ -135,6 +138,8 @@ def readIRISfedcat(fedcatfile):
     # so we have to work around this
 #    stopdate = pd.to_datetime('today')
     stopdate = pd.to_datetime('2018-10-12')
+#    stopdate = pd.to_datetime('1993-01-01')
+#    stopdate = pd.to_datetime('2019-02-01')
     stopstring = stopdate.strftime('%Y-%m-%dT%H:%M:%S')
 
     starttimes = pd.to_datetime(df.StartTime)
@@ -161,7 +166,7 @@ def getIRISfedcat(config, outname):
     Then select only those where SampleRate > min_samp_rate specified in
     config file.
     '''
-    reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net={0}&sta={1}&loc={2}&cha={3}&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC'.format(config['networks'],config['stations'], config['locations'], config['channels'])
+    reqstring = 'http://service.iris.edu/irisws/fedcatalog/1/query?net={0}&sta={1}&loc={2}&cha={3}&format=text&includeoverlaps=true&nodata=404&datacenter=IRISDMC&endtime=2018-10-12T00:00:00'.format(config['networks'],config['stations'], config['locations'], config['channels'])
     print('requesting list of stations')
     res = requests.get(reqstring)
     if res.status_code == 200:
@@ -180,6 +185,47 @@ def getIRISfedcat(config, outname):
     df.to_csv(savecsv, sep='|', index=False)
     print('Wrote list of stns with sample rate >= {0} to {1}'.format(config['min_samp_rate'],savecsv))
     return df
+
+def getStationXML(df, outdir='StationXML'): #, config, args, outdir='StationXML'):
+    '''Acquire StationXML files for a list of station epochs
+    and look for triggered vs continuous stations.'''
+    i_cont = []
+    for i in df.index:
+        outname = outdir+'/{0}_{1}_{2}.xml'.format(df.Target[i],df.StartDate[i],df.EndDate[i])
+        mask = df['Location'] == ''
+        df.loc[mask, 'Location'] = '--'
+        if not os.path.exists(outname):
+            reqbase = 'https://service.iris.edu/fdsnws/station/1/query?level=channel&format=xml&includecomments=false&nodata=404'
+            startpad_dt = pd.to_datetime(df.StartTime[i], errors='coerce') - pd.Timedelta(hours=1)
+            startpad = startpad_dt.strftime('%Y-%m-%dT%H:%M:%S')
+            endpad_dt = pd.to_datetime(df.EndTime[i], errors='coerce') + pd.Timedelta(hours=1)
+            if type(endpad_dt) == pd._libs.tslib.NaTType:
+                endpad = '3000-01-01T00:00:00'
+            else:
+                endpad = endpad_dt.strftime('%Y-%m-%dT%H:%M:%S')
+            reqstring = reqbase+'&net={0}&sta={1}&loc={2}&cha={3}&startafter={4}&endbefore={5}'.format(df.Network[i], df.Station[i], df.Location[i], df.Channel[i], startpad,endpad)
+            res = requests.get(reqstring)
+            print(reqstring)
+            outfile = open(outname, 'w')
+            outfile.write(res.text)
+            outfile.close()
+#        inv = read_inventory(StringIO(res.text))
+        inv = read_inventory(outname)
+        chan = inv[0][0][0]
+        if 'CONTINUOUS' in chan.types:
+            print('continuous:', df.Target[i], df.StartTime[i], df.EndTime[i])
+#            targets += df.Target[i]
+            i_cont.append(i)
+        elif 'TRIGGERED' in chan.types:
+            print('triggered:', df.Target[i], df.StartTime[i], df.EndTime[i])
+        else: 
+            print('no info on continuous vs triggered data, will keep but proceed w caution...', df.Target[i], df.StartTime[i], df.EndTime[i])
+            i_cont.append(i)
+    print(i_cont)
+    print(df.loc[i_cont])
+    df_cont = df.loc[i_cont]
+    df_cont.to_csv('irisfedcat_cont.txt', index=False, sep='|')
+    return df_cont
 
 
 def checkAboveLNM(df, config, args, getplots=False, 
@@ -301,6 +347,20 @@ def requestPDFs(df, args, outpdfdir):
     errorfile.close()
     return df_successful
 
+def requestPDFPlots(df, outpdfdir):
+    '''Request PDF PSD image plots from MUSTANG.'''
+    for i in df.index:
+        outname = outpdfdir+'/{0}_{1}_{2}.png'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
+        reqbase = 'http://service.iris.edu/mustang/noise-pdf/1/query?format=plot&nodata=404&plot.period.min=0.05&plot.period.max=200&plot.power.min=-200&plot.power.max=-50'
+        reqstring = reqbase + '&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
+        print(reqstring)
+        res = requests.get(reqstring)
+        if res.status_code == 200:
+            outfile = open(outname, 'wb')
+            outfile.write(res.content)
+            outfile.close()
+
+
 
 def listPDFFiles(df, outpdfdir):
     '''Make a list of all the PDF PSD files to read 
@@ -318,6 +378,7 @@ def findPDFBounds(pdffiles):
     from all individual PDF files
     '''
     print('finding list of unique freq, dB')
+    print(pdffiles[0])
     df_single = pd.read_csv(pdffiles[0], skiprows=5, 
                             names=['freq', 'db', 'hits'])
     freq_u = df_single.freq.unique()
@@ -356,6 +417,84 @@ def findUniqFreq(pdffiles):
     np.save('freq_u_str.npy', freq_u)
     return freq_u
 
+def isMicroseismOk_1perc(df, db_tol=5, f_min=0.2, f_max=0.4):
+    '''Check that a PDF does not fall to far below the Peterson NLNM
+    using MUSTANG noise-pdf noiseprofile option'''
+    # Get nlnm in terms of log(freq)
+    T_nlnm, db_nlnm = get_nlnm()
+    f_nlnm = 1./T_nlnm
+    nlnm_interp = interp1d(np.log10(f_nlnm), db_nlnm)
+
+# ex:    http://service.iris.edu/mustang/noise-pdf/1/query?target=IU.ANMO.00.BHZ.M&noiseprofile.type=1&format=noiseprofile_text 
+    reqbase = 'http://service.iris.edu/mustang/noise-pdf/1/query?noiseprofile.type=1&format=noiseprofile_text'
+    outdir = '1stPercentiles'
+    i_keep = []
+    df_successful = df.copy()
+    for i in df.index: 
+        outname = outdir+'/{0}_{1}_{2}.txt'.format(df.Target[i],
+                                                   df.StartDate[i],
+                                                   df.EndDate[i])
+        if not os.path.exists(outname):
+            # request 1st percentile
+            reqstring = reqbase+'&target={0}&starttime={1}&endtime={2}'.format(df.Target[i], df.StartDate[i], df.EndDate[i])
+            print(reqstring)
+            res = requests.get(reqstring)
+            if res.status_code == 200:
+                outfile = open(outname, 'w')
+                outfile.write(res.text)
+                outfile.close()
+                stringio = StringIO(res.text)
+            else:
+                print(df.Target[i], 'not found')
+                df_successful = df_successful.drop(i)
+    df = df_successful.copy()
+    for i in df.index:
+        outname = outdir+'/{0}_{1}_{2}.txt'.format(df.Target[i],
+                                                   df.StartDate[i],
+                                                   df.EndDate[i])
+        print(df.Target[i])
+        freq, db = np.loadtxt(outname, unpack=True, delimiter=',')
+
+        icheck = np.where((freq<=f_max) & (freq>=f_min))
+        f_check = freq[icheck]
+        db_nlnm_check = nlnm_interp(np.log10(f_check))
+        db_check = db[icheck]
+        dbdiff = db_nlnm_check - db_check
+        ibelow, = np.where(dbdiff > 5)
+        if len(ibelow) == 0:
+            i_keep.append(i)
+        else: 
+            print('1perc below nlnm: ', df.Target[i], df.StartDate[i], 
+                  df.EndDate[i])
+    df_ok = df.loc[i_keep]
+    df_ok.to_csv('irisfedcat_pass1perc.txt', index=False, sep='|')
+    return df_ok
+
+
+
+
+
+def isMicroseismOk(freq, db, hits, db_tol=5, f_min=0.2, f_max=0.4):
+    '''Check that a PDF does not fall too far below the Peterson NLNM'''
+    T_nlnm, db_nlnm = get_nlnm()
+    f_nlnm = 1./T_nlnm
+    nlnm_interp = interp1d(np.log10(f_nlnm), db_nlnm)
+
+    icheck = np.where((freq<=f_max) & (freq>=f_min))
+    f_check = freq[icheck]
+    #print(np.unique(f_check))
+    #print(f_check)
+    db_nlnm_check = nlnm_interp(np.log10(f_check))
+    db_check = db[icheck]
+    dbdiff = db_nlnm_check - db_check
+    #print(dbdiff)
+    ibelow, = np.where(dbdiff > 5)
+
+    if len(ibelow) == 0:
+        isok = True
+    else: 
+        isok = False
+    return isok
 
 def calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles, 
                 outpdffile='megapdf.npy'):
@@ -376,18 +515,26 @@ def calcMegaPDF(freq_u, freq_u_str, db_u, pdffiles,
     print('Adding individual PDFs to composite, please wait...')
     logfile = open('pdffiles.txt','w')
     for infile in pdffiles:
-        logfile.write('{0}\n'.format(infile.split('/')[-1]))
         freq = np.loadtxt(infile, unpack=True, delimiter=',', usecols=0)
         db, hits = np.loadtxt(infile, unpack=True, delimiter=',', 
                               usecols=[1,2], dtype=np.int_)
-        for i in range(len(hits)):
-            f1 = freq[i]
-            db1 = db[i]
-            hit1 = hits[i]
+
+# check microseism looks ok
+        microseism_ok = isMicroseismOk(freq, db, hits, f_min=0.1, f_max=1)
+        microseism_ok = True
+        if microseism_ok: 
+            logfile.write('{0}\n'.format(infile.split('/')[-1]))
+            print(infile.split('/')[-1])
+            for i in range(len(hits)):
+                f1 = freq[i]
+                db1 = db[i]
+                hit1 = hits[i]
         
-            i_f1 = fd[str(f1)]
-            i_db1 = dbd[db1]
-            pdf[i_f1, i_db1] += hit1
+                i_f1 = fd[str(f1)]
+                i_db1 = dbd[db1]
+                pdf[i_f1, i_db1] += hit1
+        else:
+            print('rejected based on microseismic band:', infile)
     logfile.close()
 
     # Save PDF to a numpy file so we can read+plot it easily later
@@ -473,6 +620,8 @@ def linregressHighFreqs(f, db, fnyqs, perc_name, ax, f_min=3, f_max=100,
     log_extend = np.linspace(np.log10(1.25), 2, 8)
     f_extend = 10**log_extend
     y_extend = np.log10(1./f_extend)*slope+intercept
+    if plotline:
+        ax.plot(1./f_extend, y_extend, lw=1, color='blue', ls=':')
     outfile = open('Percentiles/fit_{0}_perc.txt'.format(perc_name), 'w')
     outfile.write('T_s, dB\n')
     for i in range(len(x)):
@@ -492,10 +641,13 @@ def main():
     parser.add_argument("--doall", help="Restart from beginning: request stn-epochs and select by sample rate, check below NLNM, request PDFPSDs, sum, and plot", action='store_true')
     parser.add_argument("--request_stns", help="Request list of stn-epochs defined in config file from IRIS fedcat", action='store_true', default=False)
     parser.add_argument("--read_stns", help="Read list of stns from IRIS fedcat webservice (pipe-separated values).  If you do not use --request_stns then you MUST use this argument and supply a filename.")
+    parser.add_argument("--check_trig", help="Get StationXML and check whether Type is CONTINUOUS, TRIGGERED, or neither", default=False)
+    parser.add_argument("--check_microseism", help="Get 1st percentiles from MUSTANG and check that they don't fall too far below the NLNM in the microseismic band", default=False)
     parser.add_argument("--lnm_check", help="Check that PDF PSD values don't drop daily_perc_cutoff below Peterson NLNM for life_perc_cutoff of lifetime", action='store_true', default=False)
     parser.add_argument("--force_lnm_check", help="Re-request pct_below_nlnm output from MUSTANG even if files already exist in PctBelowNLNM",
                         action='store_true', default=False)
-    parser.add_argument("--get_PDFs", help="Request text PDF PSDs from MUSTANG for each stn-epoch", action='store_true', default=False)
+    parser.add_argument("--get_PDFs", help="Request plots of PDF PSDs from MUSTANG for each stn-epoch", action='store_true', default=False)
+    parser.add_argument("--get_PDFplots", help="Request text PDF PSDs from MUSTANG for each stn-epoch", action='store_true', default=False)
     parser.add_argument("--force_get_PDFs", help="Re-request text PDF PSDs from MUSTANG even if files already exist in IndividualPDFs", action='store_true', default=False)
     parser.add_argument("--calc_PDF", help="Sum all PDF PSD files into one composite mega-PDF", action='store_true', default=False)
     parser.add_argument("--plot_PDF", help="Plot composite PDF", action='store_true', default=False)
@@ -503,6 +655,8 @@ def main():
     args = parser.parse_args()
     if args.doall:
         args.request_stns = True
+        args.check_trig = True
+        args.check_microseism = True
         args.lnm_check = True
         args.force_lnm_check = True
         args.get_PDFs = True
@@ -521,7 +675,11 @@ def main():
     outpdfdir = workdir+'/IndividualPDFs'
     outpercdir = workdir+'/Percentiles' 
     outpbndir = workdir+'/PctBelowNLNM'
-    for outdir in [workdir, outpdfdir, outpercdir, outpbndir]:
+    outxmldir = workdir+'/StationXML'
+    out1pcdir = workdir+'/1stPercentiles'
+    mkdirs = [workdir, outpdfdir, outpercdir, outpbndir, outxmldir,
+              out1pcdir]
+    for outdir in mkdirs: 
         if not os.path.exists(outdir):
             os.mkdir(outdir)
 
@@ -533,11 +691,20 @@ def main():
         try:
             df = readIRISfedcat(args.read_stns)
         except ValueError as e:
-            print('ERROR: no list of stations provided. Use --request_stns to query IRIS, or use --read_stns <file.txt> to supply a file in iris fedcatalog format')
+            print('ERROR: no list of stations provided.')
+            print('Use --request_stns to query IRIS, or use --read_stns <file.txt> to supply a file in iris fedcatalog format')
             sys.exit(1)
         except FileNotFoundError as e:
             print('ERROR: could not find file {0}'.format(args.read_stns))
             sys.exit(1)
+
+    # Check that stations are continuous not triggered
+    if args.check_trig:
+        df = getStationXML(df)
+
+    # Check that 1st percentile for each station is above Peterson NLNM
+    if args.check_microseism:
+        df = isMicroseismOk_1perc(df)
 
     # Check if stations are above Peterson NLNM
     if args.lnm_check:
@@ -548,6 +715,9 @@ def main():
     # Request PDFs from IRIS
     if args.get_PDFs:
         df_selected = requestPDFs(df_selected, args, outpdfdir)
+
+    if args.get_PDFplots:
+        requestPDFPlots(df, outpdfdir)
 
     # Get list of existing PDFs for individual stations
     pdffiles = listPDFFiles(df_selected, outpdfdir)
@@ -638,13 +808,13 @@ def main():
         ax_freq.tick_params(axis='x', top=True, labeltop=True) 
         
         # Final setup: Draw legend and set period axis limits
-        ax.legend(ncol=2, loc='lower center', fontsize='6', handlelength=3)
+#        ax.legend(ncol=2, loc='lower center', fontsize='6', handlelength=3)
         ax.set_xlim(0.01,10)
         plt.tight_layout()
 
         # Save images of plots
         for imgtype in ['png', 'eps']:
-            fig.savefig('pdf.'+imgtype)
+            fig.savefig('pdf.'+imgtype, dpi=600)
             print('saved plot as pdf.{0}'.format(imgtype))
 
     print('Finished')

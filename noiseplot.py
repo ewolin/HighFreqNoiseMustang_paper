@@ -68,6 +68,7 @@ def setupPSDPlot():
     nhnb = np.loadtxt(piecewise+'/High_T-vs-DB.txt', unpack=True)
     nlportb = np.loadtxt(piecewise+'/Low_Port_T-vs-dB.txt', unpack=True)
     nlpermb = np.loadtxt(piecewise+'/Low_Perm_T-vs-dB.txt', unpack=True)
+    #nlportb = np.loadtxt(piecewise+'/stitch.txt', unpack=True)
 
     # Set up axes
     width=5
@@ -76,7 +77,9 @@ def setupPSDPlot():
     ax = fig.add_subplot(gs_plots[0,0])
     ax_cb = fig.add_subplot(gs_plots[0,1])
 
-    colorlist = ['gold', '#ff7f0e', '#d62728']
+#    colorlist = ['gold', '#ff7f0e', '#d62728']
+#    colorlist = ['green', 'gold', '#ff7f0e', '#d62728']
+    colorlist = ['gold', '#ff7f0e', '#d62728', 'green']
     ax.set_prop_cycle(cycler('color', colorlist))
 
     ax.semilogx()
@@ -89,9 +92,16 @@ def setupPSDPlot():
     ax.plot(nhnm[0], nhnm[1], linewidth=2, color='black', label='NHNM/NLNM')
     ax.plot(nlnm[0], nlnm[1], linewidth=2, color='black')
 
+#    icheck, = np.where((nlnm[0] >= 1./0.4)&(nlnm[0]<=1./0.2))
+    f_min = 0.2 
+    f_max = 0.4
+    icheck, = np.where((nlnm[0] >= 1./f_max)&(nlnm[0]<=1./f_min))
+    ax.plot(nlnm[0][icheck], nlnm[1][icheck]-5, linewidth=1, color='grey', linestyle='--')
+    #print(nlnm[0][icheck])
+
     # Plot high-frequency extensions 
-    ax.plot(nlpermb[0], nlpermb[1], color='grey', ls='-.', lw=3, 
-            label='Low Permanent Baseline')
+    #ax.plot(nlpermb[0], nlpermb[1], color='grey', ls='-.', lw=3, 
+    #        label='Low Permanent Baseline')
     ax.plot(nlportb[0], nlportb[1], linewidth=3, ls='--', color='grey', 
             label='Low Portable Baseline')
     ax.plot(nhnb[0], nhnb[1], color='grey', ls=(0,(1,1)), lw=3, 
@@ -99,5 +109,7 @@ def setupPSDPlot():
 
     # Plot Brune corner frequency grid
     plotBrune(ax)
+# dummy point w/no labels in case we don't plot HF noise models
+    #ax.plot(np.zeros(1), np.zeros([1]), color='w', alpha=0, label=' ')
 
     return fig, ax
