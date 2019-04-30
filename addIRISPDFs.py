@@ -199,28 +199,33 @@ def getStationXML(df, outdir='StationXML'): #, config, args, outdir='StationXML'
             startpad_dt = pd.to_datetime(df.StartTime[i], errors='coerce') - pd.Timedelta(hours=1)
             startpad = startpad_dt.strftime('%Y-%m-%dT%H:%M:%S')
             endpad_dt = pd.to_datetime(df.EndTime[i], errors='coerce') + pd.Timedelta(hours=1)
-            if type(endpad_dt) == pd._libs.tslib.NaTType:
+#            if type(endpad_dt) == pd._libs.tslib.NaTType:
+            if type(endpad_dt) == pd._libs.tslibs.nattype.NaTType:
                 endpad = '3000-01-01T00:00:00'
             else:
                 endpad = endpad_dt.strftime('%Y-%m-%dT%H:%M:%S')
             reqstring = reqbase+'&net={0}&sta={1}&loc={2}&cha={3}&startafter={4}&endbefore={5}'.format(df.Network[i], df.Station[i], df.Location[i], df.Channel[i], startpad,endpad)
             res = requests.get(reqstring)
             print(reqstring)
-            outfile = open(outname, 'w')
-            outfile.write(res.text)
-            outfile.close()
+            if res.status_code == 200:
+                outfile = open(outname, 'w')
+                outfile.write(res.text)
+                outfile.close()
+            else:
+                termcolor=31
+                print('\033[1;{3};40m {0} {1} {2} not found \033[0;37;40m '.format(df.Target[i], df.StartTime[i], df.EndTime[i], termcolor))
 #        inv = read_inventory(StringIO(res.text))
-        inv = read_inventory(outname)
-        chan = inv[0][0][0]
-        if 'CONTINUOUS' in chan.types:
-            print('continuous:', df.Target[i], df.StartTime[i], df.EndTime[i])
-#            targets += df.Target[i]
-            i_cont.append(i)
-        elif 'TRIGGERED' in chan.types:
-            print('triggered:', df.Target[i], df.StartTime[i], df.EndTime[i])
-        else: 
-            print('no info on continuous vs triggered data, will keep but proceed w caution...', df.Target[i], df.StartTime[i], df.EndTime[i])
-            i_cont.append(i)
+        if os.path.exists(outname):
+            inv = read_inventory(outname)
+            chan = inv[0][0][0]
+            if 'CONTINUOUS' in chan.types:
+                print('continuous:', df.Target[i], df.StartTime[i], df.EndTime[i])
+                i_cont.append(i)
+            elif 'TRIGGERED' in chan.types:
+                print('triggered:', df.Target[i], df.StartTime[i], df.EndTime[i])
+            else: 
+                print('no info on continuous vs triggered data, will keep but proceed w caution...', df.Target[i], df.StartTime[i], df.EndTime[i])
+                i_cont.append(i)
     print(i_cont)
     print(df.loc[i_cont])
     df_cont = df.loc[i_cont]
@@ -641,8 +646,9 @@ def main():
     parser.add_argument("--doall", help="Restart from beginning: request stn-epochs and select by sample rate, check below NLNM, request PDFPSDs, sum, and plot", action='store_true')
     parser.add_argument("--request_stns", help="Request list of stn-epochs defined in config file from IRIS fedcat", action='store_true', default=False)
     parser.add_argument("--read_stns", help="Read list of stns from IRIS fedcat webservice (pipe-separated values).  If you do not use --request_stns then you MUST use this argument and supply a filename.")
-    parser.add_argument("--check_trig", help="Get StationXML and check whether Type is CONTINUOUS, TRIGGERED, or neither", default=False)
-    parser.add_argument("--check_microseism", help="Get 1st percentiles from MUSTANG and check that they don't fall too far below the NLNM in the microseismic band", default=False)
+    parser.add_argument("--check_trig", help="Get StationXML and check whether Type is CONTINUOUS, TRIGGERED, or neither", action='store_true', default=False)
+    parser.add_argument("--check_microseism", help="Get 1st percentiles from MUSTANG and check that they don't fall too far below the NLNM in the microseismic band",
+                        action='store_true', default=False)
     parser.add_argument("--lnm_check", help="Check that PDF PSD values don't drop daily_perc_cutoff below Peterson NLNM for life_perc_cutoff of lifetime", action='store_true', default=False)
     parser.add_argument("--force_lnm_check", help="Re-request pct_below_nlnm output from MUSTANG even if files already exist in PctBelowNLNM",
                         action='store_true', default=False)
@@ -808,7 +814,7 @@ def main():
         ax_freq.tick_params(axis='x', top=True, labeltop=True) 
         
         # Final setup: Draw legend and set period axis limits
-#        ax.legend(ncol=2, loc='lower center', fontsize='6', handlelength=3)
+        ax.legend(ncol=2, loc='lower center', fontsize='6', handlelength=3)
         ax.set_xlim(0.01,10)
         plt.tight_layout()
 
