@@ -65,7 +65,7 @@ def setupPSDPlot():
     piecewise = os.path.join(codedir,'PiecewiseModels')
     nhnm = np.loadtxt(codedir+'/peterson_HNM.mod', unpack=True)
     nlnm = np.loadtxt(codedir+'/peterson_LNM.mod', unpack=True)
-    nhnb = np.loadtxt(piecewise+'/High_T-vs-DB.txt', unpack=True)
+    nhnb = np.loadtxt(piecewise+'/High_T-vs-dB.txt', unpack=True)
     nlportb = np.loadtxt(piecewise+'/Low_Port_T-vs-dB.txt', unpack=True)
     nlpermb = np.loadtxt(piecewise+'/Low_Perm_T-vs-dB.txt', unpack=True)
     #nlportb = np.loadtxt(piecewise+'/stitch.txt', unpack=True)

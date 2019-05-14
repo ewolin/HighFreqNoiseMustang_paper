@@ -23,7 +23,7 @@ GS | PERM | PORT | TA
 Each folder contains a file called config.json and irisfedcat_[GS|PERM|PORT|TA].txt.
 
 ```bash
-addIRISPDFs.py --read_stns irisfedcat_[GS|PERM|PORT|TA].txt --lnm_check --get_PDFs --calc_PDFs --plot_PDF
+addIRISPDFs.py --read_stns irisfedcat_[GS|PERM|PORT|TA].txt --lnm_check --get_PDFs --calc_PDF --plot_PDF
 ```
 
 ## Using the code on your own
